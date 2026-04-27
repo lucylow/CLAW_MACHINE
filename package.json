@@ -1,0 +1,19 @@
+{
+  "name": "openagents-full-stack",
+  "version": "2.0.0",
+  "description": "Decentralized AI Agent Framework on 0G Labs — ETHGlobal Open Agents",
+  "private": true,
+  "workspaces": [
+    "backend",
+    "frontend"
+  ],
+  "scripts": {
+    "dev": "concurrently \"npm run dev --workspace=backend\" \"npm run dev --workspace=frontend\"",
+    "build": "npm run build --workspace=backend && npm run build --workspace=frontend",
+    "install-all": "npm install && npm install --workspace=backend && npm install --workspace=frontend",
+    "start": "npm run start --workspace=backend"
+  },
+  "devDependencies": {
+    "concurrently": "^8.2.0"
+  }
+}
