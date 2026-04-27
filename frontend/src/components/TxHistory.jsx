@@ -12,6 +12,7 @@ export function TxHistory({ transactions = [] }) {
             </span>
             <div className="tx-details">
               <span className="tx-desc">{tx.description || tx.type}</span>
+              {tx.network && <span className="tx-time">{tx.network}</span>}
               {tx.hash && (
                 <a
                   className="tx-hash"

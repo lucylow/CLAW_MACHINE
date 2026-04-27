@@ -1,177 +1,202 @@
-# OpenAgents v2.0
+# OpenAgents (CLAW_MACHINE)
 
-**Decentralized AI Agent Framework on 0G Labs** — ETHGlobal Open Agents Hackathon
+Production-looking, hackathon-ready 0G-native agent framework with:
+- composable TypeScript runtime (`AgentRuntime`)
+- persistent memory model with reflection loop
+- skill registry + execution traces
+- wallet-aware React DApp UI
+- explicit 0G chain/storage/compute configuration and degraded fallback modes
 
-> Build autonomous AI agents that live on-chain, powered by 0G Compute Network for sealed inference and 0G Storage for persistent decentralized memory.
+## Why this matters
 
----
+Most demo agents are stateless chat wrappers. OpenAgents focuses on continuity:
+- it stores structured memory per session/wallet
+- it generates structured reflections after failures
+- it retrieves and summarizes prior context for future turns
+- it surfaces traces and lessons in the UI for transparent behavior
 
 ## Architecture
 
-```
-Browser (React DApp)
-  WalletPanel (MetaMask / EIP-1193)
-  AgentChat (messages, suggestions)
-  AgentStatus (skills, info, tx history)
-  useWallet hook + api.js service
-        |
-        | HTTP /api/*
-        v
-Express Backend (Node.js)
-  /api/agent/run  /api/agent/skills  /api/agent/history
-  /api/storage/*  /api/wallet/*
+```text
+React DApp (frontend)
+  Wallet connect + chat + status + tx history + memory/reflection panel
         |
         v
-  Agent Core (TypeScript)
-  Agent.ts + Skill.ts + StorageProvider + ComputeProvider
+Express API (backend)
+  /health /ready /api/config
+  /api/agent/* /api/storage/* /api/wallet/*
         |
-   _____|_____________________
-  |           |               |
-  v           v               v
-0G Compute  0G Storage    0G Chain (EVM)
-(inference) (KV + Log)    chainId: 16600
+        v
+Agent Runtime (TypeScript)
+  AgentRuntime
+    -> SkillRegistry
+    -> MemoryStore (tiered records)
+    -> ReflectionEngine
+    -> EventBus (trace + observability)
+    -> ComputeProvider / StorageProvider adapters
+        |
+        +--> 0G Chain (wallet/tx identity)
+        +--> 0G Storage (artifacts + memory persistence path)
+        +--> 0G Compute (inference path)
 ```
-
----
 
 ## Quick Start
 
 ### Prerequisites
-
 - Node.js 18+
-- MetaMask or any EIP-1193 wallet
-- (Optional) 0G Testnet tokens from the 0G Faucet
+- npm
+- MetaMask (optional but recommended for full demo)
 
-### Setup
-
+### Install and run
 ```bash
-# 1. Install dependencies
-npm run install-all
-
-# 2. Configure environment
+npm install
 cp .env.example .env
-# Edit .env with your 0G RPC URL and agent private key
-
-# 3. Start development servers
 npm run dev
-# Frontend: http://localhost:3000
-# Backend:  http://localhost:3001
 ```
 
-### Build for Production
+- Frontend: `http://localhost:3000`
+- Backend: `http://localhost:3001`
 
+### Build
 ```bash
 npm run build
-# Frontend output: frontend/dist/
-# Backend output:  backend/dist/
 ```
 
----
+## Demo flow (under 3 minutes)
 
-## Wallet Integration
+1. Open app, connect wallet.
+2. Ask: `Summarize my wallet activity`.
+3. Ask: `Run a swap simulation`.
+4. Ask: `Show the last mistake you learned from`.
+5. Open memory/reflection panel and show continuity.
+6. Show tx history + skill execution trace + backend status.
 
-The frontend uses a custom `useWallet` hook built on **ethers.js v6**:
+## API surface
 
-- Auto-reconnect on page reload
-- Network switching to 0G Testnet (chainId: 16600) with one click
-- Real-time balance display
-- Message signing for wallet-based authentication
-- Account/chain change listeners
+- `GET /health` - liveness
+- `GET /ready` - readiness + provider health/degraded modes
+- `GET /api/config` - runtime config visibility
+- `GET /api/agent/status`
+- `POST /api/agent/run`
+- `GET /api/agent/skills`
+- `POST /api/agent/skills/execute`
+- `GET /api/agent/history`
+- `DELETE /api/agent/history`
+- `POST /api/storage/upload`
+- `GET /api/storage/download/:hash`
+- `POST /api/wallet/register`
+- `GET /api/wallet/:addr/config`
+- `PUT /api/wallet/:addr/config`
 
-```js
-import { useWallet } from './hooks/useWallet';
-const { account, balance, connect, switchTo0G, signMessage } = useWallet();
+## Memory and reflection model
+
+### Memory categories
+- `session_state`
+- `conversation_turn`
+- `task_result`
+- `reflection`
+- `skill_execution`
+- `wallet_profile`
+- `artifact`
+- `error_event`
+- `summary`
+
+### Reflection shape
+- source turn id
+- task type
+- success/failure result
+- root cause and mistake summary
+- corrective advice
+- confidence + severity + tags
+- related memory IDs
+- next best action
+
+## 0G integration clarity
+
+- **0G Chain**: wallet identity, signing flow, tx metadata, explorer linking.
+- **0G Storage**: artifact hash path and storage endpoints.
+- **0G Compute**: inference and reflection generation path (mock/default mode available).
+
+Fallback modes are explicit:
+- compute unavailable -> mock compute path (degraded)
+- storage unavailable -> memory mode (degraded)
+- wallet disconnected -> read-only exploration still works
+
+## Repository layout
+
+```text
+backend/src/
+  config/
+  core/
+  events/
+  memory/
+  reflection/
+  skills/
+  providers/
+  types/
+  server.ts
+frontend/src/
+  components/
+  hooks/
+  services/
+  App.jsx
+shared/
+  types.ts
 ```
 
----
+## Environment variables
 
-## API Endpoints
+See `.env.example`. Key values:
+- `PORT`
+- `CORS_ORIGIN`
+- `OG_RPC_URL`
+- `OG_CHAIN_ID`
+- `OG_STORAGE_RPC`
+- `OG_COMPUTE_RPC`
+- `OG_COMPUTE_MODE` (`mock` or `production`)
+- `OG_STORAGE_MODE` (`memory` or `production`)
 
-| Method | Path | Description |
-|--------|------|-------------|
-| GET  | /api/agent/status | Agent health and configuration |
-| POST | /api/agent/run | Run agent with a prompt |
-| GET  | /api/agent/skills | List available skills |
-| POST | /api/agent/skills/execute | Execute a specific skill |
-| GET  | /api/agent/history | Get conversation history |
-| DELETE | /api/agent/history | Clear conversation history |
-| POST | /api/storage/upload | Upload to 0G Storage |
-| GET  | /api/storage/download/:hash | Download from 0G Storage |
-| POST | /api/wallet/register | Register wallet with signature |
-| GET  | /api/wallet/:addr/config | Get wallet agent config |
-| PUT  | /api/wallet/:addr/config | Update wallet agent config |
+## Quality gates
 
-All requests support `x-wallet-address` header for wallet-specific behavior.
+- TypeScript build passes for backend
+- Vite production build passes for frontend
+- request IDs + structured logs for observability
+- consistent JSON error format for API responses
 
----
+## Error handling and degraded modes
 
-## Skills
+### Error model
+- Backend normalizes failures into typed `AppError` objects with stable codes.
+- API errors use a consistent envelope:
+  - `ok: false`
+  - `error.code`, `error.message`, `error.category`
+  - `error.recoverable`, `error.retryable`
+  - `error.requestId` and `error.details`
 
-| Skill | Description |
-|-------|-------------|
-| UniswapSwap | Token swaps via Uniswap V3 |
-| 0GStorage | Decentralized data storage on 0G |
-| 0GCompute | AI inference via 0G Compute Network |
-| ENSLookup | ENS name resolution |
-| PriceOracle | Live token price feeds |
-| WalletAnalysis | Portfolio and transaction analysis |
+### Recovery behavior
+- Validation issues return 4xx with actionable fields.
+- Provider/network failures are normalized and may retry with bounded backoff.
+- Agent runtime phase failures are tracked in trace output and may degrade gracefully.
+- Reflection and persistence failures do not always fail the primary user answer.
 
----
+### Fallback visibility
+- Mock/degraded modes are exposed via:
+  - `GET /ready`
+  - `GET /api/agent/status`
+  - frontend diagnostics banner and runtime traces
 
-## 0G Network Details
+### Troubleshooting quick notes
+- Wallet not connecting: verify wallet extension and 0G testnet chain selection.
+- Storage download fails: validate hash format and whether artifact exists locally.
+- Compute unavailable: run in demo/mock mode with `OG_COMPUTE_MODE=mock`.
+- Backend error details: inspect `requestId` from UI and logs for correlation.
 
-| Property | Value |
-|----------|-------|
-| Chain ID | 16600 |
-| Network | 0G Newton Testnet |
-| RPC | https://evmrpc-testnet.0g.ai |
-| Explorer | https://chainscan-newton.0g.ai |
-| Currency | A0GI |
+## Roadmap
 
----
-
-## Project Structure
-
-```
-openagents/
-├── frontend/
-│   ├── src/
-│   │   ├── components/
-│   │   │   ├── AgentChat.jsx      # Chat UI with suggestions
-│   │   │   ├── AgentStatus.jsx    # Status panel with skills
-│   │   │   ├── WalletPanel.jsx    # Wallet connect/disconnect UI
-│   │   │   └── TxHistory.jsx      # Transaction history
-│   │   ├── hooks/
-│   │   │   └── useWallet.js       # ethers.js wallet hook
-│   │   ├── services/
-│   │   │   └── api.js             # Axios API service layer
-│   │   ├── App.jsx                # Main app with state management
-│   │   └── App.css                # DApp-style dark theme
-│   ├── index.html
-│   ├── vite.config.js
-│   └── package.json
-├── backend/
-│   ├── src/
-│   │   ├── core/
-│   │   │   ├── Agent.ts           # Abstract agent base class
-│   │   │   └── Skill.ts           # Skill manager
-│   │   ├── providers/
-│   │   │   ├── StorageProvider.ts # 0G Storage integration
-│   │   │   └── ComputeProvider.ts # 0G Compute integration
-│   │   ├── skills/
-│   │   │   └── UniswapSkill.ts    # Uniswap V3 skill
-│   │   ├── utils/
-│   │   │   └── EventEmitter.ts    # Async event system
-│   │   ├── server.ts              # Express API server
-│   │   └── index.ts               # Package exports
-│   └── package.json
-├── shared/
-│   └── types.ts                   # Shared TypeScript types
-├── .env.example
-└── README.md
-```
-
----
+- add real 0G storage/compute SDK adapters behind current interfaces
+- add integration tests for `/api/agent/run` and reflection loops
+- add semantic retrieval ranking (importance + recency + task affinity)
+- persist memory snapshots with schema migration support
 
 ## License
 

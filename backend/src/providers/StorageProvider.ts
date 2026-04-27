@@ -1,4 +1,6 @@
 import { createHash } from 'crypto';
+import { StorageError, StorageIntegrityError, ValidationError } from '../errors/AppError';
+import { withRetry } from '../utils/retry';
 
 /**
  * Interface for 0G Storage Provider.
@@ -6,10 +8,11 @@ import { createHash } from 'crypto';
  */
 export class StorageProvider {
     private rpcUrl: string;
+    private readonly inMemory = new Map<string, Buffer>();
 
     constructor(rpcUrl: string) {
         if (!rpcUrl) {
-            throw new Error("RPC URL is required for StorageProvider");
+            throw new ValidationError("RPC URL is required for StorageProvider", "CFG_001_INVALID_ENV");
         }
         this.rpcUrl = rpcUrl;
     }
@@ -21,17 +24,28 @@ export class StorageProvider {
      */
     async upload(data: Buffer): Promise<string> {
         if (!data || data.length === 0) {
-            throw new Error("Cannot upload empty data");
+            throw new ValidationError("Cannot upload empty data");
+        }
+        if (data.length > 1024 * 1024 * 2) {
+            throw new ValidationError("Payload too large for storage upload", "STORAGE_001_UPLOAD_FAILED", { maxBytes: 1024 * 1024 * 2, actualBytes: data.length });
         }
 
-        console.log(`[Storage] Uploading ${data.length} bytes to 0G Storage at ${this.rpcUrl}`);
-        
-        // Simulating 0G Storage content-addressable hash
-        const hash = createHash('sha256').update(data).digest('hex');
-        const rootHash = `0x${hash}`;
-        
-        console.log(`[Storage] Upload successful. Root Hash: ${rootHash}`);
-        return rootHash;
+        return withRetry(
+            async () => {
+                const hash = createHash('sha256').update(data).digest('hex');
+                const rootHash = `0x${hash}`;
+                this.inMemory.set(rootHash, data);
+                return rootHash;
+            },
+            (error) => error instanceof StorageError ? error.retryable : false,
+            { retries: 2 }
+        ).catch((error) => {
+            throw new StorageError("Failed to upload artifact to 0G Storage", "STORAGE_001_UPLOAD_FAILED", {
+                operation: "storage.upload",
+                rpcUrl: this.rpcUrl,
+                size: data.length,
+            }, true);
+        });
     }
 
     /**
@@ -40,18 +54,17 @@ export class StorageProvider {
      * @returns The downloaded data as a Buffer.
      */
     async download(rootHash: string): Promise<Buffer> {
-        if (!rootHash || !rootHash.startsWith('0x')) {
-            throw new Error("Invalid root hash format");
+        if (!rootHash || !/^0x[a-fA-F0-9]{64}$/.test(rootHash)) {
+            throw new ValidationError("Invalid root hash format", "STORAGE_002_DOWNLOAD_FAILED", { rootHash });
         }
-
-        console.log(`[Storage] Downloading from 0G Storage: ${rootHash}`);
-        
-        // In a real environment, this would fetch from the decentralized network.
-        // For now, we return a mocked state.
-        return Buffer.from(JSON.stringify({ 
-            status: "success", 
-            timestamp: Date.now(),
-            data: "mocked state for " + rootHash 
-        }));
+        const stored = this.inMemory.get(rootHash);
+        if (!stored) {
+            throw new StorageError("Storage object not found", "STORAGE_002_DOWNLOAD_FAILED", { rootHash, operation: "storage.download" }, false);
+        }
+        const computed = `0x${createHash('sha256').update(stored).digest('hex')}`;
+        if (computed !== rootHash) {
+            throw new StorageIntegrityError("Stored content hash mismatch", { rootHash, computed, operation: "storage.verifyHash" });
+        }
+        return stored;
     }
 }

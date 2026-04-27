@@ -1,5 +1,47 @@
 // ── Agent API Types ────────────────────────────────────────────────────────
 
+export type ErrorCategory =
+  | 'validation'
+  | 'configuration'
+  | 'authentication'
+  | 'authorization'
+  | 'wallet'
+  | 'chain'
+  | 'storage'
+  | 'compute'
+  | 'agent'
+  | 'skill'
+  | 'reflection'
+  | 'memory'
+  | 'event'
+  | 'external'
+  | 'rate_limit'
+  | 'not_found'
+  | 'conflict'
+  | 'internal';
+
+export interface ApiErrorShape {
+  code: string;
+  message: string;
+  category: ErrorCategory;
+  recoverable: boolean;
+  retryable: boolean;
+  requestId?: string;
+  details?: Record<string, unknown>;
+  timestamp?: number;
+}
+
+export interface ApiSuccess<T> {
+  ok: true;
+  data: T;
+  meta?: Record<string, unknown>;
+}
+
+export interface ApiFailure {
+  ok: false;
+  error: ApiErrorShape;
+}
+
 export interface AgentStatusResponse {
   status: 'idle' | 'processing' | 'error' | 'online';
   agent: string;

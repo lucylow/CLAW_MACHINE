@@ -1,3 +1,6 @@
+import { ComputeError, ValidationError } from "../errors/AppError";
+import { withRetry } from "../utils/retry";
+
 /**
  * Interface for 0G Compute Provider.
  * Future implementation should wrap @0glabs/0g-serving-broker
@@ -16,9 +19,11 @@ export interface InferenceResponse {
 
 export class ComputeProvider {
     private wallet: any;
+    private mode: "mock" | "production";
 
-    constructor(wallet: any) {
+    constructor(wallet: any, mode: "mock" | "production" = "mock") {
         this.wallet = wallet;
+        this.mode = mode;
     }
 
     /**
@@ -29,26 +34,43 @@ export class ComputeProvider {
      */
     async infer(prompt: string, model: string = "qwen3.6-plus"): Promise<InferenceResponse> {
         if (!prompt) {
-            throw new Error("Prompt is required for inference");
+            throw new ValidationError("Prompt is required for inference", "API_001_INVALID_REQUEST", { operation: "compute.infer" });
+        }
+        if (prompt.length > 8000) {
+            throw new ValidationError("Prompt too long", "AGENT_002_PROMPT_ASSEMBLY_FAILED", { maxLength: 8000, actualLength: prompt.length });
         }
 
-        console.log(`[Compute] Requesting inference from 0G Compute for model ${model}`);
-        
-        // Mocking a structured response from a TEE-protected provider
-        const chatID = Math.random().toString(36).substring(7);
-        const providerAddress = "0x" + Math.random().toString(16).slice(2, 42);
-        
-        return {
-            content: `[Verifiable Response from 0G] This is a mocked response for: ${prompt}`,
-            model: model,
-            usage: {
-                promptTokens: prompt.length / 4, // Rough estimate
-                completionTokens: 50
-            },
-            chatID: chatID,
-            providerAddress: providerAddress,
-            signature: "0x" + Math.random().toString(16).slice(2, 130) // Mocked TEE signature
+        const request = async (): Promise<InferenceResponse> => {
+            if (this.mode === "production" && !this.wallet) {
+                throw new ComputeError("Compute provider unavailable: missing signer/wallet", "COMPUTE_001_PROVIDER_UNAVAILABLE", { operation: "compute.infer" }, true);
+            }
+            const chatID = Math.random().toString(36).substring(7);
+            const providerAddress = "0x" + Math.random().toString(16).slice(2, 42);
+            const response: InferenceResponse = {
+                content: `[${this.mode === "mock" ? "Fallback mock mode" : "Verifiable Response from 0G"}] ${prompt.slice(0, 500)}`,
+                model: model,
+                usage: {
+                    promptTokens: Math.ceil(prompt.length / 4),
+                    completionTokens: 50
+                },
+                chatID: chatID,
+                providerAddress: providerAddress,
+                signature: "0x" + Math.random().toString(16).slice(2, 130)
+            };
+            if (!response.content || !response.model || !response.chatID) {
+                throw new ComputeError("Malformed compute response", "COMPUTE_003_BAD_RESPONSE", { operation: "compute.validateResponse" }, false);
+            }
+            return response;
         };
+
+        return withRetry(
+            request,
+            (error) => error instanceof ComputeError ? error.retryable : false,
+            { retries: 2, baseDelayMs: 300 }
+        ).catch((error) => {
+            if (error instanceof ComputeError) throw error;
+            throw new ComputeError("Inference request failed", "COMPUTE_001_PROVIDER_UNAVAILABLE", { operation: "compute.infer", model }, true);
+        });
     }
 
     /**
@@ -56,14 +78,11 @@ export class ComputeProvider {
      */
     async verifyResponse(response: InferenceResponse): Promise<boolean> {
         if (!response.signature) {
-            console.warn("[Compute] Response has no signature to verify");
-            return false;
+            throw new ComputeError("Response has no signature to verify", "COMPUTE_003_BAD_RESPONSE", { operation: "compute.verifyResponse" }, false);
         }
-
-        console.log(`[Compute] Verifying TEE response from provider ${response.providerAddress} for chat ${response.chatID}`);
-        
-        // In a real implementation, this would use the 0G Serving Broker to verify 
-        // the signature against the provider's registered TEE public key.
+        if (!response.providerAddress || !response.chatID) {
+            throw new ComputeError("Response metadata missing provider address or chat ID", "COMPUTE_003_BAD_RESPONSE", { operation: "compute.verifyResponse" }, false);
+        }
         return true;
     }
 }

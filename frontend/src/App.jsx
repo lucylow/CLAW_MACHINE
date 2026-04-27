@@ -3,8 +3,10 @@ import { AgentChat } from './components/AgentChat.jsx';
 import { AgentStatus } from './components/AgentStatus.jsx';
 import { WalletPanel } from './components/WalletPanel.jsx';
 import { TxHistory } from './components/TxHistory.jsx';
+import { MemoryPanel } from './components/MemoryPanel.jsx';
 import { useWallet } from './hooks/useWallet.js';
 import { agentApi, walletApi } from './services/api.js';
+import { ErrorBanner } from './components/ErrorBanner.jsx';
 import './App.css';
 
 export default function App() {
@@ -16,6 +18,8 @@ export default function App() {
   const [skills, setSkills]             = useState([]);
   const [transactions, setTransactions] = useState([]);
   const [backendOnline, setBackendOnline] = useState(false);
+  const [historyInsights, setHistoryInsights] = useState(null);
+  const [uiError, setUiError] = useState(null);
 
   // ── Fetch backend status on mount ──────────────────────────────────────────
   useEffect(() => {
@@ -25,6 +29,7 @@ export default function App() {
         setBackendInfo(data);
         setAgentStatus('idle');
         setBackendOnline(true);
+        setUiError(null);
       } catch {
         setAgentStatus('error');
         setBackendOnline(false);
@@ -39,7 +44,7 @@ export default function App() {
   useEffect(() => {
     agentApi.listSkills()
       .then((data) => setSkills(data?.skills || []))
-      .catch(() => {});
+      .catch((error) => setUiError(error));
   }, [backendOnline]);
 
   // ── Sync wallet address to localStorage for API interceptor ────────────────
@@ -66,6 +71,16 @@ export default function App() {
     registerWallet();
   }, [wallet.isConnected, wallet.account, backendOnline]);
 
+  useEffect(() => {
+    if (!wallet.account || !backendOnline) {
+      setHistoryInsights(null);
+      return;
+    }
+    agentApi.getHistory(wallet.account)
+      .then((data) => setHistoryInsights(data))
+      .catch((error) => setUiError(error));
+  }, [wallet.account, backendOnline, messages.length]);
+
   // ── Send message to agent ───────────────────────────────────────────────────
   const handleSendMessage = useCallback(async (input, retries = 2) => {
     setAgentStatus('processing');
@@ -78,6 +93,7 @@ export default function App() {
 
     try {
       const data = await agentApi.run(input, wallet.account);
+      setUiError(null);
 
       setMessages((prev) => [
         ...prev,
@@ -86,6 +102,7 @@ export default function App() {
           content: data.output,
           timestamp: Date.now(),
           txHash: data.txHash || null,
+          trace: data.trace || [],
         },
       ]);
 
@@ -95,7 +112,9 @@ export default function App() {
           {
             hash: data.txHash,
             description: input.slice(0, 40),
+            type: data.selectedSkill || 'agent.run',
             status: 'success',
+            network: '0G Newton',
             timestamp: Date.now(),
           },
           ...prev,
@@ -107,11 +126,12 @@ export default function App() {
       if (retries > 0) {
         setTimeout(() => handleSendMessage(input, retries - 1), 1200);
       } else {
+        setUiError(error);
         setMessages((prev) => [
           ...prev,
           {
             role: 'system',
-            content: `Error: ${error.message}`,
+            content: `Error: ${error.message} (${error.code || 'unknown'})`,
             timestamp: Date.now(),
           },
         ]);
@@ -173,7 +193,16 @@ export default function App() {
         {/* Sidebar */}
         <aside className="sidebar">
           <WalletPanel wallet={wallet} />
+          <ErrorBanner
+            error={uiError}
+            onRetry={() => {
+              setUiError(null);
+              window.location.reload();
+            }}
+            onDismiss={() => setUiError(null)}
+          />
           <AgentStatus status={agentStatus} info={backendInfo} skills={skills} />
+          <MemoryPanel history={historyInsights} />
           <TxHistory transactions={transactions} />
         </aside>
 

@@ -88,6 +88,9 @@ export function AgentChat({ messages, onSendMessage, isProcessing, isWalletConne
                   View on 0G Explorer ↗
                 </a>
               )}
+              {Array.isArray(msg.trace) && msg.trace.length > 0 && (
+                <p className="input-hint">Trace: {msg.trace.join(' -> ')}</p>
+              )}
             </div>
             {msg.role === 'user' && (
               <span className="role-avatar">👤</span>

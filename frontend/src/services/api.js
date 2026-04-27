@@ -8,19 +8,64 @@ const client = axios.create({
   headers: { 'Content-Type': 'application/json' },
 });
 
+function genRequestId() {
+  return `req_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+}
+
+export class ApiClientError extends Error {
+  constructor({
+    code = 'INTERNAL_001_UNEXPECTED',
+    message = 'Request failed',
+    category = 'internal',
+    recoverable = true,
+    retryable = false,
+    requestId,
+    details = {},
+    status,
+  }) {
+    super(message);
+    this.name = 'ApiClientError';
+    this.code = code;
+    this.category = category;
+    this.recoverable = recoverable;
+    this.retryable = retryable;
+    this.requestId = requestId;
+    this.details = details;
+    this.status = status;
+  }
+}
+
 // Attach wallet address to every request if available
 client.interceptors.request.use((config) => {
   const wallet = localStorage.getItem('oa_wallet');
   if (wallet) config.headers['x-wallet-address'] = wallet;
+  config.headers['x-request-id'] = config.headers['x-request-id'] || genRequestId();
   return config;
 });
 
 // Normalize errors
 client.interceptors.response.use(
-  (res) => res.data,
+  (res) => {
+    const payload = res.data;
+    if (payload && typeof payload === 'object' && 'ok' in payload) {
+      return payload.data;
+    }
+    return payload;
+  },
   (err) => {
-    const msg = err.response?.data?.error || err.response?.data?.message || err.message || 'Request failed';
-    return Promise.reject(new Error(msg));
+    const data = err.response?.data;
+    const normalized = data?.error || {};
+    const error = new ApiClientError({
+      code: normalized.code || (err.code === 'ECONNABORTED' ? 'NET_001_TIMEOUT' : 'NET_000_REQUEST_FAILED'),
+      message: normalized.message || err.message || 'Request failed',
+      category: normalized.category || (!navigator.onLine ? 'external' : 'internal'),
+      recoverable: typeof normalized.recoverable === 'boolean' ? normalized.recoverable : true,
+      retryable: typeof normalized.retryable === 'boolean' ? normalized.retryable : err.code === 'ECONNABORTED',
+      requestId: normalized.requestId || err.response?.headers?.['x-request-id'],
+      details: normalized.details || {},
+      status: err.response?.status,
+    });
+    return Promise.reject(error);
   }
 );
 
