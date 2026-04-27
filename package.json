@@ -11,9 +11,14 @@
     "dev": "concurrently \"npm run dev --workspace=backend\" \"npm run dev --workspace=frontend\"",
     "build": "npm run build --workspace=backend && npm run build --workspace=frontend",
     "install-all": "npm install && npm install --workspace=backend && npm install --workspace=frontend",
-    "start": "npm run start --workspace=backend"
+    "start": "npm run start --workspace=backend",
+    "test:e2e": "playwright test",
+    "test:e2e:auth": "playwright test tests/e2e/auth-flow.spec.ts",
+    "test:e2e:security": "playwright test tests/e2e/security.spec.ts",
+    "test:e2e:smoke": "playwright test --grep @smoke"
   },
   "devDependencies": {
+    "@playwright/test": "^1.54.2",
     "concurrently": "^8.2.0"
   }
 }

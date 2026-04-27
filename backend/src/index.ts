@@ -9,3 +9,27 @@ export * from './skills/SkillRegistry';
 export * from './memory/MemoryStore';
 export * from './reflection/ReflectionEngine';
 export * from './events/EventBus';
+
+// Provider-agnostic scaffold exports
+export * from "./schemas/provider";
+export * from "./schemas/llm";
+export * from "./schemas/storage";
+export * from "./providers/base";
+export * from "./providers/errors";
+export * from "./providers/retry";
+export * from "./providers/llm/types";
+export * from "./providers/llm/base-llm-provider";
+export * from "./providers/storage/types";
+export * from "./adapters/openai/openai.adapter";
+export * from "./adapters/anthropic/anthropic.adapter";
+export * from "./adapters/zero-g/zero-g-compute.adapter";
+export * from "./adapters/zero-g/zero-g-storage.adapter";
+export * from "./adapters/local/local-llm.adapter";
+export * from "./adapters/local/redis-storage.adapter";
+export * from "./adapters/mock/mock-llm.adapter";
+export * from "./adapters/openclaw/openclaw.adapter";
+export { ProviderRegistry } from "./core/provider-registry";
+export { MemoryOrchestrator } from "./core/memory/memory-orchestrator";
+export { ReflectionEngine as ProviderReflectionEngine } from "./core/reflection/reflection-engine";
+export { RuntimeRouter } from "./core/router";
+export { ProviderAgentRuntime } from "./core/agent-runtime";

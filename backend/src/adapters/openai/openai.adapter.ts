@@ -41,13 +41,25 @@ export class OpenAiAdapter extends BaseLlmProvider {
   }
 
   async chat(request: ChatRequest): Promise<ChatResponse> {
+    const messages = request.messages.map((m) => {
+      const content = typeof m.content === "string" ? m.content : JSON.stringify(m.content);
+      if (m.role === "tool") {
+        return {
+          role: "tool" as const,
+          content,
+          tool_call_id: m.toolCallId ?? "tool_call_0",
+        };
+      }
+      return {
+        role: m.role as "system" | "user" | "assistant",
+        content,
+        ...(m.name ? { name: m.name } : {}),
+      };
+    });
+
     const resp = await this.client.chat.completions.create({
       model: request.model ?? this.model,
-      messages: request.messages.map((m) => ({
-        role: m.role,
-        content: typeof m.content === "string" ? m.content : JSON.stringify(m.content),
-        name: m.name,
-      })),
+      messages,
       temperature: request.temperature,
       top_p: request.topP,
       max_tokens: request.maxTokens,
