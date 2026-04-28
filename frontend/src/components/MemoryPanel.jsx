@@ -10,9 +10,14 @@ export function MemoryPanel({ history }) {
       ) : (
         <ul className="skills-list">
           {memories.slice(-5).reverse().map((m) => (
-            <li key={m.id} className="skill-item">
-              <span className="skill-dot" />
-              <span>{m.type}: {m.summary}</span>
+            <li key={m.id} className="skill-item" style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: '2px' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', width: '100%', alignItems: 'center' }}>
+                <span style={{ fontSize: '0.65rem', color: 'var(--accent)', fontWeight: 'bold', textTransform: 'uppercase' }}>{m.type}</span>
+                <span style={{ fontSize: '0.65rem', color: 'var(--yellow)' }}>
+                  {Array(Math.max(1, Math.ceil(m.importance * 3))).fill('★').join('')}
+                </span>
+              </div>
+              <span style={{ fontSize: '0.75rem' }}>{m.summary}</span>
             </li>
           ))}
         </ul>

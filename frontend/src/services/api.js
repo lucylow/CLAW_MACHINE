@@ -93,6 +93,13 @@ export const agentApi = {
   /** Clear agent conversation history */
   clearHistory: (walletAddress) =>
     client.delete('/agent/history', { data: { walletAddress } }),
+
+  /** Richer insights: memory stats, events, reflections */
+  getInsights: (walletAddress) =>
+    client.get('/agent/insights', { params: { wallet: walletAddress } }),
+
+  /** Health check with memory/skill stats */
+  health: () => client.get('/health', { baseURL: '' }),
 };
 
 // ─── Storage endpoints ─────────────────────────────────────────────────────────

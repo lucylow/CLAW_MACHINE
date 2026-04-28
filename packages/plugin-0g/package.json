@@ -1,0 +1,12 @@
+{
+  "name": "@claw/plugin-0g",
+  "version": "0.1.0",
+  "description": "First-party 0G Storage + 0G Compute plugin for @claw/core",
+  "main": "src/index.ts",
+  "types": "src/index.ts",
+  "keywords": ["claw", "0g", "agent", "plugin", "storage", "compute"],
+  "license": "MIT",
+  "peerDependencies": {
+    "@claw/core": "^0.1.0"
+  }
+}

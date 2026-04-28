@@ -89,7 +89,20 @@ export function AgentChat({ messages, onSendMessage, isProcessing, isWalletConne
                 </a>
               )}
               {Array.isArray(msg.trace) && msg.trace.length > 0 && (
-                <p className="input-hint">Trace: {msg.trace.join(' -> ')}</p>
+                <div className="message-trace">
+                  <div className="trace-header">
+                    <span className="trace-label">Execution Trace</span>
+                    <span className="trace-status">Verifiable via 0G Compute</span>
+                  </div>
+                  <div className="trace-steps">
+                    {msg.trace.map((step, i) => (
+                      <span key={i} className="trace-step">
+                        {step.replace('phase:', '').replace('_', ' ')}
+                        {i < msg.trace.length - 1 && <span className="trace-arrow">→</span>}
+                      </span>
+                    ))}
+                  </div>
+                </div>
               )}
             </div>
             {msg.role === 'user' && (

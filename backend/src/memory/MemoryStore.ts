@@ -31,23 +31,51 @@ export class MemoryStore {
     walletAddress?: string;
     type?: MemoryType;
     tags?: string[];
+    query?: string;
     limit?: number;
   }): MemoryRecord[] {
     const limit = params.limit || 20;
     const tags = params.tags || [];
+    const query = params.query?.toLowerCase();
+
     return [...this.records.values()]
       .filter((r) => (params.sessionId ? r.sessionId === params.sessionId : true))
       .filter((r) => (params.walletAddress ? r.walletAddress === params.walletAddress : true))
       .filter((r) => (params.type ? r.type === params.type : true))
       .filter((r) => (tags.length ? tags.some((tag) => r.tags.includes(tag)) : true))
-      .sort((a, b) => (b.importance - a.importance) || (b.updatedAt - a.updatedAt))
+      .map(r => {
+        // Calculate a relevance score based on query match and importance
+        let score = r.importance;
+        if (query) {
+          if (r.summary.toLowerCase().includes(query)) score += 0.5;
+          if (r.tags.some(t => t.toLowerCase().includes(query))) score += 0.3;
+        }
+        return { record: r, score };
+      })
+      .sort((a, b) => b.score - a.score || b.record.updatedAt - a.record.updatedAt)
+      .map(item => item.record)
       .slice(0, limit);
   }
 
   summarize(sessionId: string): string {
-    const recent = this.listBySession(sessionId).slice(-10);
-    if (!recent.length) return "No memory stored yet.";
-    return recent.map((r) => `[${r.type}] ${r.summary}`).join("\n");
+    const records = this.listBySession(sessionId);
+    if (!records.length) return "No memory stored yet.";
+
+    // Prioritize reflections and important turns
+    const reflections = records.filter(r => r.type === 'reflection').slice(-5);
+    const importantTurns = records.filter(r => r.type === 'conversation_turn' && r.importance > 0.7).slice(-5);
+    const recentTurns = records.filter(r => r.type === 'conversation_turn').slice(-3);
+
+    const summaryParts = [
+      "### Recent Reflections & Lessons Learned",
+      ...reflections.map(r => `- ${r.summary}`),
+      "\n### Key Past Actions",
+      ...importantTurns.map(r => `- ${r.summary}`),
+      "\n### Recent Context",
+      ...recentTurns.map(r => `- ${r.summary}`)
+    ];
+
+    return summaryParts.join("\n");
   }
 
   prune(maxRecordsPerSession = 150): number {

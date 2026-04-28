@@ -1,0 +1,13 @@
+{
+  "name": "@claw/react",
+  "version": "0.1.0",
+  "description": "React hooks and context provider for @claw/core agents",
+  "main": "src/index.tsx",
+  "types": "src/index.tsx",
+  "keywords": ["claw", "react", "agent", "hooks", "wallet"],
+  "license": "MIT",
+  "peerDependencies": {
+    "@claw/core": "^0.1.0",
+    "react": ">=18.0.0"
+  }
+}

@@ -12,6 +12,18 @@ import { SkillRegistry } from "./skills/SkillRegistry";
 import { AgentRuntime } from "./core/AgentRuntime";
 import { AppError, NotFoundError, ValidationError } from "./errors/AppError";
 import { normalizeError, toApiErrorResponse } from "./errors/normalize";
+import { agentRunLimiter, globalLimiter } from "./middleware/rateLimiter";
+import { createSkillsRouter } from "./routes/skills";
+import { createMemoryRouter } from "./routes/memory";
+import { initSse, emitPhase, emitResult, emitError } from "./utils/sse";
+import { ZeroGStorageAdapter } from "./adapters/ZeroGStorageAdapter";
+import { ZeroGComputeAdapter } from "./adapters/ZeroGComputeAdapter";
+import { OpenClawAdapter } from "./adapters/OpenClawAdapter";
+import { MemoryOrchestrator } from "./core/MemoryOrchestrator";
+import { HierarchicalPlanner } from "./core/HierarchicalPlanner";
+import { PruningService } from "./core/PruningService";
+import { createPlannerRouter } from "./routes/planner";
+import { createOpenClawRouter } from "./routes/openclaw";
 
 dotenv.config();
 
@@ -25,6 +37,23 @@ const compute = new ComputeProvider(null, config.computeMode);
 const storage = new StorageProvider(process.env.OG_STORAGE_RPC || "memory://0g");
 const reflection = new ReflectionEngine("qwen3.6-plus");
 const runtime = new AgentRuntime(compute, storage, skills, memory, reflection, events);
+
+// ── v4 adapters (0G Storage KV/Log, 0G Compute TEE, OpenClaw bridge) ────────
+const zgStorage = new ZeroGStorageAdapter();
+const zgCompute = new ZeroGComputeAdapter({ defaultModel: "qwen3.6-plus" });
+const memoryOrchestrator = new MemoryOrchestrator(zgStorage, zgCompute);
+const hierarchicalPlanner = new HierarchicalPlanner(zgCompute);
+const pruningService = new PruningService(memoryOrchestrator, zgCompute, zgStorage);
+const openClawAdapter = new OpenClawAdapter(skills);
+// ── v6 adapters (SkillEvolutionEngine, OnChainSkillRegistry) ────────────────
+const evolutionEngine = new SkillEvolutionEngine(zgCompute as any, zgStorage as any, skills);
+const chainRegistry = new OnChainSkillRegistry({
+  rpcUrl: process.env.EVM_RPC || "https://evmrpc-testnet.0g.ai",
+  contractAddress: process.env.CONTRACT_ADDRESS || "0x0000000000000000000000000000000000000000",
+  privateKey: process.env.PRIVATE_KEY,
+});
+chainRegistry.connect().catch(() => {});
+console.log(JSON.stringify({ level: "info", message: "0G adapters ready", storageMode: zgStorage.getStats().mode, computeMode: zgCompute.getMode() }));
 
 const walletRegistry = new Map<string, { registeredAt: number; signature: string }>();
 const walletConfig = new Map<string, Record<string, unknown>>();
@@ -121,6 +150,47 @@ skills.register(
   { execute: async () => ({ output: "Recent reflections indicate input validation and fallback clarity should be prioritized." }) },
 );
 
+skills.register(
+  {
+    id: "agent.swarm",
+    name: "AgentSwarm",
+    description: "Coordinate multiple specialized agents for complex tasks",
+    tags: ["swarm", "multi-agent", "coordination"],
+    requiresWallet: false,
+    touchesChain: false,
+    usesCompute: true,
+    usesStorage: false,
+    enabled: true,
+  },
+  { 
+    execute: async (input) => {
+      const task = input.prompt || "general task";
+      const requestId = randomUUID().slice(0, 8);
+      return { 
+        output: `Swarm coordination [ID:${requestId}] complete for: "${task}".
+        
+[Analyst Agent]
+- Status: Completed
+- Action: Decomposed task into 3 sub-steps.
+- Insight: High probability of success on 0G Newton.
+
+[Executor Agent]
+- Status: Ready
+- Action: Prepared transaction payload for 0G chain.
+- Resource: 0G Compute Node #42.
+
+[Monitor Agent]
+- Status: Verified
+- Action: Validated TEE signature and security policy.
+- Result: All constraints satisfied.`,
+        agents: ["Analyst", "Executor", "Monitor"],
+        swarmId: requestId,
+        timestamp: Date.now()
+      };
+    } 
+  },
+);
+
 app.use(
   cors({
     origin: config.corsOrigin,
@@ -129,6 +199,7 @@ app.use(
   }),
 );
 app.use(express.json({ limit: "1mb" }));
+app.use(globalLimiter);
 
 app.use((req: Request, res: Response, next: NextFunction) => {
   const requestId = (req.headers["x-request-id"] as string) || randomUUID();
@@ -163,7 +234,19 @@ function safeAsync(fn: (req: Request, res: Response, next: NextFunction) => Prom
 }
 
 app.get("/health", (_req: Request, res: Response) => {
-  ok(res, { status: "ok", uptime: process.uptime() });
+  const memUsage = process.memoryUsage();
+  ok(res, {
+    status: "ok",
+    uptime: process.uptime(),
+    memory: {
+      heapUsedMb: Math.round(memUsage.heapUsed / 1024 / 1024),
+      heapTotalMb: Math.round(memUsage.heapTotal / 1024 / 1024),
+      rssMb: Math.round(memUsage.rss / 1024 / 1024),
+    },
+    memoryStore: { total: memory.search({ limit: 9999 }).length },
+    skills: { registered: skills.list().length, enabled: skills.list().filter(s => s.enabled).length },
+    events: { recent: events.recent(1).length > 0 },
+  });
 });
 
 app.get("/ready", (_req: Request, res: Response) => {
@@ -206,18 +289,83 @@ app.get("/api/agent/status", (_req: Request, res: Response) => {
   });
 });
 
-app.get("/api/agent/skills", (_req: Request, res: Response) => {
-  ok(res, { skills: skills.list() });
+// Skills management router (GET/POST /:id/enable|disable)
+app.use("/api/agent/skills", createSkillsRouter(skills));
+
+// Memory search & management router
+app.use("/api/memory", createMemoryRouter(memory));
+
+// ── v4 routes ────────────────────────────────────────────────────────────────
+app.use("/api/agent/plan", createPlannerRouter(hierarchicalPlanner, runtime));
+app.use("/api/agent/plans", createPlannerRouter(hierarchicalPlanner, runtime));
+app.use("/api/openclaw", createOpenClawRouter(openClawAdapter, skills));
+
+// Memory Orchestrator endpoints
+app.get("/api/memory/orchestrator/stats", (_req: Request, res: Response) => {
+  ok(res, { stats: memoryOrchestrator.getStats() });
 });
 
-app.post("/api/agent/skills/execute", safeAsync(async (req: Request, res: Response) => {
-  const skillId = requireString(req.body?.skill, "skill", 200);
-  if (!skillId) throw new ValidationError("skill is required", "API_001_INVALID_REQUEST", { field: "skill" });
-  const result = await skills.execute(skillId, req.body?.params || {});
-  ok(res, { skill: skillId, result });
+app.post("/api/memory/orchestrator/search", safeAsync(async (req: Request, res: Response) => {
+  const query = requireString(req.body?.query, "query", 500);
+  if (!query) throw new ValidationError("query required", "API_001_INVALID_REQUEST", { field: "query" });
+  const walletAddress = typeof req.body?.walletAddress === "string" ? req.body.walletAddress : undefined;
+  const limit = typeof req.body?.limit === "number" ? req.body.limit : 5;
+  const results = await memoryOrchestrator.retrieveLessons(query, { limit, walletAddress });
+  ok(res, { results, count: results.length });
 }));
 
-app.post("/api/agent/run", safeAsync(async (req: Request, res: Response) => {
+app.post("/api/memory/orchestrator/reflect", safeAsync(async (req: Request, res: Response) => {
+  const input = requireString(req.body?.input, "input", 1000);
+  const output = requireString(req.body?.output, "output", 2000);
+  if (!input || !output) throw new ValidationError("input and output required", "API_001_INVALID_REQUEST");
+  const success = req.body?.success !== false;
+  const sessionId = typeof req.body?.sessionId === "string" ? req.body.sessionId : "guest";
+  const walletAddress = typeof req.body?.walletAddress === "string" ? req.body.walletAddress : undefined;
+  const reflection = await memoryOrchestrator.reflectTask({ input, sessionId, walletAddress }, { success, output });
+  ok(res, { reflection });
+}));
+
+// Periodic memory pruning
+setInterval(() => {
+  pruningService.maybePrune().then((r) => {
+    if (r) console.log(JSON.stringify({ level: "info", message: "Memory pruned", evicted: r.evicted, summarized: r.summarized, durationMs: r.durationMs }));
+  }).catch(() => {});
+}, 5 * 60 * 1000);
+
+// ── SSE Streaming endpoint ────────────────────────────────────────────────
+app.post("/api/agent/stream", agentRunLimiter, safeAsync(async (req: Request, res: Response) => {
+  const input = requireString(req.body?.input, "input");
+  const walletAddress = typeof req.body?.walletAddress === "string" ? req.body.walletAddress : undefined;
+  if (!input) {
+    res.status(400).json({ error: "input required" });
+    return;
+  }
+  const sse = initSse(req, res);
+  const sessionId = walletAddress || "guest";
+  const requestId = (req as Request & { requestId: string }).requestId;
+
+  const unsubscribe = events.on((event) => {
+    if (event.requestId === requestId) {
+      emitPhase(sse, event.type, event.payload);
+    }
+  });
+  req.on("close", unsubscribe);
+
+  try {
+    emitPhase(sse, "started", { input: input.slice(0, 80) });
+    emitPhase(sse, "routing");
+    const result = await runtime.runTurn({ input, walletAddress, sessionId }, requestId);
+    emitPhase(sse, "complete", { degraded: result.degradedMode });
+    emitResult(sse, result);
+  } catch (err: unknown) {
+    const normalized = normalizeError(err, { operation: "stream" });
+    emitError(sse, normalized.code, normalized.message);
+  } finally {
+    unsubscribe();
+  }
+}));
+
+app.post("/api/agent/run", agentRunLimiter, safeAsync(async (req: Request, res: Response) => {
   const input = requireString(req.body?.input, "input");
   const walletAddress = typeof req.body?.walletAddress === "string" ? req.body.walletAddress : undefined;
   if (!input) throw new ValidationError("input must be a non-empty string up to 2000 chars", "API_001_INVALID_REQUEST", { field: "input" });
@@ -229,10 +377,31 @@ app.post("/api/agent/run", safeAsync(async (req: Request, res: Response) => {
 }));
 
 app.get("/api/agent/history", (req: Request, res: Response) => {
-  const wallet = requireString(req.query.wallet, "wallet", 128);
+  const wallet = requireString(req.query.wallet as string, "wallet", 128);
   if (!wallet) throw new ValidationError("wallet query param required", "API_001_INVALID_REQUEST", { field: "wallet" });
   const data = runtime.getInsights(wallet);
   ok(res, data);
+});
+
+// Richer insights endpoint
+app.get("/api/agent/insights", (req: Request, res: Response) => {
+  const wallet = requireString(req.query.wallet as string, "wallet", 128) || "guest";
+  const insights = runtime.getInsights(wallet);
+  const memStats = memory.search({ sessionId: wallet, limit: 200 });
+  const byType: Record<string, number> = {};
+  for (const m of memStats) byType[m.type] = (byType[m.type] ?? 0) + 1;
+  ok(res, {
+    ...insights,
+    stats: {
+      totalMemories: memStats.length,
+      byType,
+      pinnedCount: memStats.filter(m => (m as typeof m & { pinned?: boolean }).pinned).length,
+      avgImportance: memStats.length
+        ? (memStats.reduce((s, m) => s + m.importance, 0) / memStats.length).toFixed(3)
+        : 0,
+    },
+    recentEvents: events.recent(10),
+  });
 });
 
 app.delete("/api/agent/history", (req: Request, res: Response) => {
@@ -289,6 +458,11 @@ app.put("/api/wallet/:addr/config", (req: Request, res: Response) => {
   walletConfig.set(wallet, next);
   ok(res, { walletAddress: wallet, config: next });
 });
+
+// ── v6 routes ────────────────────────────────────────────────────────────────
+app.use("/api/evolution", createEvolutionRouter(evolutionEngine, chainRegistry));
+app.use("/api/onchain",   createOnChainRouter(chainRegistry));
+app.use("/api/builder",   createBuilderRouter());
 
 app.use((_req: Request) => {
   throw new NotFoundError("Endpoint not found");

@@ -9,14 +9,63 @@ export class ReflectionEngine {
     this.modelName = modelName;
   }
 
-  generate(params: {
+  async generate(params: {
     sourceTurnId: string;
     taskType: string;
     success: boolean;
     errorMessage?: string;
     selectedSkill?: string;
     relatedMemoryIds?: string[];
-  }): ReflectionRecord | null {
+    trace?: string[];
+    compute?: any; // Pass compute provider for LLM-based reflection
+  }): Promise<ReflectionRecord | null> {
+    // We now reflect on both successes and failures to build a better knowledge base
+    let reflection: ReflectionRecord;
+    
+    if (params.compute && (params.errorMessage || !params.success)) {
+      try {
+        const prompt = `Analyze this agent execution turn and provide a structured reflection.
+Task: ${params.taskType}
+Skill: ${params.selectedSkill || 'none'}
+Success: ${params.success}
+Error: ${params.errorMessage || 'none'}
+Trace: ${params.trace?.join(' -> ') || 'none'}
+
+Return JSON: { "rootCause": string, "mistakeSummary": string, "correctiveAdvice": string, "severity": "low"|"medium"|"high", "nextBestAction": string }`;
+        
+        const res = await params.compute.infer(prompt);
+        const analysis = JSON.parse(res.content.replace(/```json|```/g, ''));
+        
+        reflection = {
+          reflectionId: randomUUID(),
+          sourceTurnId: params.sourceTurnId,
+          taskType: params.taskType,
+          result: params.success ? "success" : "failure",
+          rootCause: analysis.rootCause,
+          mistakeSummary: analysis.mistakeSummary,
+          correctiveAdvice: analysis.correctiveAdvice,
+          confidence: 0.92,
+          severity: analysis.severity,
+          tags: [params.taskType, params.selectedSkill || "general", "llm_analyzed"],
+          relatedMemoryIds: params.relatedMemoryIds || [],
+          nextBestAction: analysis.nextBestAction,
+          createdAt: Date.now(),
+          model: this.modelName,
+          computeRef: "0g-compute-reflection",
+        };
+      } catch (e) {
+        // Fallback to rule-based if LLM fails
+        return this.generateRuleBased(params);
+      }
+    } else {
+      return this.generateRuleBased(params);
+    }
+
+    this.reflections.set(reflection.reflectionId, reflection);
+    return reflection;
+  }
+
+  private generateRuleBased(params: any): ReflectionRecord | null {
     if (params.success && !params.errorMessage) return null;
     const reflection: ReflectionRecord = {
       reflectionId: randomUUID(),

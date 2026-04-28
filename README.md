@@ -1,11 +1,58 @@
-# OpenAgents (CLAW_MACHINE)
+# CLAW_MACHINE v5 — Self-Improving Agent Framework on 0G
 
-Production-looking, hackathon-ready 0G-native agent framework with:
+> **EthGlobal 2025 — Best Agent Framework, Tooling & Core Extensions track**
+
+A production-ready, self-improving agent **framework** built on 0G Storage + 0G Compute, with full OpenClaw plugin compatibility. CLAW_MACHINE is not just an app — it is an installable SDK that any developer can use to build their own agents.
+
+## Framework Packages
+
+| Package | Install | Description |
+|---------|---------|-------------|
+| `@claw/core` | `npm i @claw/core` | Core SDK — `createAgent`, `AgentBuilder`, `defineSkill`, `definePlugin`, built-in mock adapters |
+| `@claw/plugin-0g` | `npm i @claw/plugin-0g` | 0G Storage (KV/Log/Blob) + 0G Compute (TEE inference) as a one-line plugin |
+| `@claw/plugin-openclaw` | `npm i @claw/plugin-openclaw` | Bidirectional `AnyAgentTool` ↔ `SkillDefinition` bridge |
+| `@claw/react` | `npm i @claw/react` | `AgentProvider`, `useAgent`, `useAgentStream`, `useWallet` React hooks |
+| `@claw/cli` | `npm i -g @claw/cli` | `claw init`, `claw skill add`, `claw plugin add`, `claw dev` |
+
+## 5-Minute Quick Start
+
+```bash
+# Scaffold a new agent project
+npx @claw/cli init my-agent
+cd my-agent && cp .env.example .env && npm install && npm run dev
+```
+
+Or use the SDK directly:
+
+```ts
+import { AgentBuilder, defineSkill } from "@claw/core";
+import { zeroGPlugin } from "@claw/plugin-0g";
+import { openClawPlugin } from "@claw/plugin-openclaw";
+
+const agent = await new AgentBuilder()
+  .setName("MyAgent")
+  .setSystemPrompt("You are a DeFi assistant on 0G.")
+  .use(zeroGPlugin({ rpc: process.env.EVM_RPC! }))
+  .use(openClawPlugin({ tools: [myOpenClawTool] }))
+  .skill(myCustomSkill)
+  .enableReflection()
+  .build();
+
+const result = await agent.run({ message: "What can you do?" });
+console.log(result.output);
+await agent.destroy();
+```
+
+See `examples/frameworkDemo.ts` for a full working demo (no credentials needed — runs in mock mode).
+
 - composable TypeScript runtime (`AgentRuntime`)
-- persistent memory model with reflection loop
-- skill registry + execution traces
-- wallet-aware React DApp UI
-- explicit 0G chain/storage/compute configuration and degraded fallback modes
+- **three-tier persistent memory** (0G Storage KV / Log / Blob)
+- **hierarchical planning** with dependency graph execution
+- **semantic memory retrieval** via in-process VectorIndex
+- **OpenClaw bidirectional bridge** (`AnyAgentTool` ↔ SkillRegistry)
+- **TEE-verifiable inference** via 0G Compute
+- skill registry + execution traces + SSE streaming
+- wallet-aware React DApp UI with 7 sidebar panels
 
 ## Why this matters
 
@@ -17,27 +64,33 @@ Most demo agents are stateless chat wrappers. OpenAgents focuses on continuity:
 
 ## Architecture
 
+![Architecture Diagram](./architecture.png)
+
 ```text
 React DApp (frontend)
-  Wallet connect + chat + status + tx history + memory/reflection panel
+  WalletPanel | AgentChat (SSE) | SkillsPanel | PlannerPanel
+  MemoryPanel | InsightsPanel | TxHistory | HowItWorks
         |
         v
-Express API (backend)
-  /health /ready /api/config
+Express API (backend)  —  rate limiter + Zod validation
   /api/agent/* /api/storage/* /api/wallet/*
+  /api/openclaw/* /api/memory/orchestrator/*
         |
         v
 Agent Runtime (TypeScript)
   AgentRuntime
-    -> SkillRegistry
-    -> MemoryStore (tiered records)
-    -> ReflectionEngine
+    -> SkillRegistry <-> OpenClawAdapter (AnyAgentTool bridge)
+    -> MemoryOrchestrator (Hot KV / Warm Log / Cold Archive)
+       -> VectorIndex (cosine similarity retrieval)
+       -> PruningService (LRU eviction + summarization)
+    -> HierarchicalPlanner (goal decomposition + parallel execution)
+    -> ReflectionEngine (structured JSON reflections)
     -> EventBus (trace + observability)
-    -> ComputeProvider / StorageProvider adapters
         |
-        +--> 0G Chain (wallet/tx identity)
-        +--> 0G Storage (artifacts + memory persistence path)
-        +--> 0G Compute (inference path)
+        +--> 0G Chain (chainId 16600, wallet identity)
+        +--> ZeroGStorageAdapter (KV stream / Log / Blob + SHA-256 hash)
+        +--> ZeroGComputeAdapter (TEE inference, provider acknowledgment)
+        +--> OpenClaw ecosystem (plugin tools, export manifest)
 ```
 
 ## Quick Start
@@ -71,22 +124,42 @@ npm run build
 5. Open memory/reflection panel and show continuity.
 6. Show tx history + skill execution trace + backend status.
 
-## API surface
+## API surface (v4)
 
-- `GET /health` - liveness
-- `GET /ready` - readiness + provider health/degraded modes
-- `GET /api/config` - runtime config visibility
-- `GET /api/agent/status`
-- `POST /api/agent/run`
-- `GET /api/agent/skills`
-- `POST /api/agent/skills/execute`
-- `GET /api/agent/history`
-- `DELETE /api/agent/history`
-- `POST /api/storage/upload`
-- `GET /api/storage/download/:hash`
-- `POST /api/wallet/register`
-- `GET /api/wallet/:addr/config`
-- `PUT /api/wallet/:addr/config`
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/health` | Liveness + heap/RSS/skill stats |
+| GET | `/ready` | Readiness + provider health |
+| GET | `/api/config` | Runtime config visibility |
+| GET | `/api/agent/status` | Agent status + skills list |
+| POST | `/api/agent/run` | Run agent turn (REST) |
+| POST | `/api/agent/stream` | Run agent turn (SSE streaming) |
+| POST | `/api/agent/plan` | Create + execute hierarchical plan |
+| GET | `/api/agent/plans` | List recent plans |
+| GET | `/api/agent/plans/:id` | Get specific plan |
+| GET | `/api/agent/skills` | List all skills |
+| GET | `/api/agent/skills/:id` | Get one skill manifest |
+| POST | `/api/agent/skills/:id/enable` | Enable skill at runtime |
+| POST | `/api/agent/skills/:id/disable` | Disable skill at runtime |
+| POST | `/api/agent/skills/execute` | Direct skill execution |
+| GET | `/api/agent/insights` | Memory stats + reflections + events |
+| GET | `/api/agent/history` | Conversation history |
+| DELETE | `/api/agent/history` | Clear history |
+| GET | `/api/memory/search` | Semantic search |
+| GET | `/api/memory/stats` | Memory type breakdown |
+| POST | `/api/memory/pin/:id` | Pin record |
+| DELETE | `/api/memory/:id` | Soft-delete record |
+| GET | `/api/memory/orchestrator/stats` | MemoryOrchestrator stats |
+| POST | `/api/memory/orchestrator/search` | Semantic search via orchestrator |
+| POST | `/api/memory/orchestrator/reflect` | Trigger reflection |
+| GET | `/api/openclaw/tools` | List skills as OpenClaw tools |
+| POST | `/api/openclaw/tools/execute` | Execute OpenClaw tool |
+| GET | `/api/openclaw/export` | Full OpenClaw plugin manifest |
+| POST | `/api/storage/upload` | Upload artifact to 0G Storage |
+| GET | `/api/storage/download/:hash` | Download by root hash |
+| POST | `/api/wallet/register` | Register wallet with EIP-191 signature |
+| GET | `/api/wallet/:addr/config` | Get wallet config |
+| PUT | `/api/wallet/:addr/config` | Update wallet config |
 
 ## Memory and reflection model
 
@@ -113,14 +186,44 @@ npm run build
 
 ## 0G integration clarity
 
-- **0G Chain**: wallet identity, signing flow, tx metadata, explorer linking.
-- **0G Storage**: artifact hash path and storage endpoints.
-- **0G Compute**: inference and reflection generation path (mock/default mode available).
+| 0G Primitive | Usage |
+|-------------|-------|
+| 0G Storage KV stream | Hot session state (fast reads/writes per wallet) |
+| 0G Storage Log | Append-only episode history (auditable, ordered) |
+| 0G Storage Blob | Compressed long-term memory archive + SHA-256 verification |
+| 0G Compute | LLM inference (qwen3.6-plus, GLM-5-FP8, DeepSeek-V3.1) |
+| 0G Compute TEE | Verifiable reflection generation with provider signature |
+| 0G Compute Embeddings | 1536-dim vectors for semantic memory retrieval |
+| 0G Chain (16600) | Wallet identity, EIP-191 signed registration, explorer links |
 
 Fallback modes are explicit:
-- compute unavailable -> mock compute path (degraded)
-- storage unavailable -> memory mode (degraded)
-- wallet disconnected -> read-only exploration still works
+- compute unavailable → mock compute path (degraded)
+- storage unavailable → in-memory mode (degraded)
+- wallet disconnected → read-only exploration still works
+
+## OpenClaw integration
+
+```typescript
+// Register any OpenClaw AnyAgentTool as a Claw Machine skill
+const adapter = new OpenClawAdapter(skillRegistry);
+adapter.registerTool(myOpenClawTool, { tags: ['openclaw', 'defi'] });
+
+// Export all Claw Machine skills as OpenClaw tools
+const tools = adapter.exportAllAsOpenClawTools();
+
+// REST endpoint for OpenClaw plugin manifest
+// GET /api/openclaw/export
+```
+
+## Example agent
+
+See `examples/supportAgent.ts` for a working example:
+
+```bash
+cd examples && npx ts-node supportAgent.ts
+```
+
+Demonstrates: 3-turn conversation, memory accumulation, hierarchical planning, full stats output.
 
 ## Repository layout
 
@@ -193,10 +296,12 @@ See `.env.example`. Key values:
 
 ## Roadmap
 
-- add real 0G storage/compute SDK adapters behind current interfaces
-- add integration tests for `/api/agent/run` and reflection loops
-- add semantic retrieval ranking (importance + recency + task affinity)
-- persist memory snapshots with schema migration support
+- Add integration tests for `/api/agent/run` and reflection loops
+- Persist memory snapshots with schema migration support
+- Add no-code visual agent builder with one-click 0G deployment
+- Add multi-modal reasoning (image/audio input via 0G Compute)
+- Add agent-to-agent communication via 0G Storage message queues
+- Add on-chain skill registry contract on 0G Chain
 
 ## License
 

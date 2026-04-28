@@ -1,11 +1,10 @@
 {
-  "name": "openagents-full-stack",
-  "version": "2.0.0",
-  "description": "Decentralized AI Agent Framework on 0G Labs — ETHGlobal Open Agents",
+  "name": "claw-machine",
+  "version": "0.5.0",
+  "description": "Self-improving agent framework on 0G — @claw/core SDK, plugins, CLI, React hooks",
   "private": true,
   "workspaces": [
-    "backend",
-    "frontend"
+    "packages/*"
   ],
   "scripts": {
     "dev": "concurrently \"npm run dev --workspace=backend\" \"npm run dev --workspace=frontend\"",
@@ -15,7 +14,9 @@
     "test:e2e": "playwright test",
     "test:e2e:auth": "playwright test tests/e2e/auth-flow.spec.ts",
     "test:e2e:security": "playwright test tests/e2e/security.spec.ts",
-    "test:e2e:smoke": "playwright test --grep @smoke"
+    "test:e2e:smoke": "playwright test --grep @smoke",
+    "demo": "npx tsx examples/frameworkDemo.ts",
+    "packages:build": "cd packages/core && tsc -p tsconfig.json"
   },
   "devDependencies": {
     "@playwright/test": "^1.54.2",

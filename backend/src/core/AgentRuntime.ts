@@ -100,13 +100,15 @@ export class AgentRuntime {
     let reflection = null;
     try {
       phase = "reflecting";
-      reflection = this.reflection.generate({
+      reflection = await this.reflection.generate({
         sourceTurnId: turnId,
         taskType: selectedSkill || "general_chat",
         success: !failed,
         errorMessage,
         selectedSkill,
         relatedMemoryIds: [turnMemory.id],
+        trace,
+        compute: this.compute,
       });
       trace.push(`phase:${phase}`);
     } catch (error) {
@@ -197,6 +199,7 @@ export class AgentRuntime {
     if (lower.includes("wallet") || lower.includes("balance")) return "wallet.analysis";
     if (lower.includes("ens") || lower.includes(".eth")) return "ens.lookup";
     if (lower.includes("reflection") || lower.includes("mistake")) return "reflection.summarize";
+    if (lower.includes("swarm") || lower.includes("coordinate") || lower.includes("team")) return "agent.swarm";
     return undefined;
   }
 }
