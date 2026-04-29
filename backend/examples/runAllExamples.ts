@@ -14,7 +14,7 @@ const files = [
 
 for (const file of files) {
   console.log(`\n=== Running ${file} ===`);
-  execSync(`npx ts-node --project examples/tsconfig.json examples/${file}`, {
+  execSync(`npx tsx examples/${file}`, {
     stdio: 'inherit',
     cwd: backendRoot,
     env: process.env,

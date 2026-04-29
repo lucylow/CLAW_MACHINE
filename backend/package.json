@@ -8,13 +8,13 @@
     "build": "tsc",
     "start": "node dist/server.js",
     "test": "jest",
-    "examples:all": "ts-node --project examples/tsconfig.json examples/runAllExamples.ts",
-    "example:support": "ts-node --project examples/tsconfig.json examples/supportAgent.ts",
-    "example:research": "ts-node --project examples/tsconfig.json examples/researchAgent.ts",
-    "example:planner": "ts-node --project examples/tsconfig.json examples/plannerAgent.ts",
-    "example:ops": "ts-node --project examples/tsconfig.json examples/opsAgent.ts",
-    "example:market": "ts-node --project examples/tsconfig.json examples/marketAgent.ts",
-    "example:coordinator": "ts-node --project examples/tsconfig.json examples/coordinatorAgent.ts"
+    "examples:all": "tsx examples/runAllExamples.ts",
+    "example:support": "tsx examples/supportAgent.ts",
+    "example:research": "tsx examples/researchAgent.ts",
+    "example:planner": "tsx examples/plannerAgent.ts",
+    "example:ops": "tsx examples/opsAgent.ts",
+    "example:market": "tsx examples/marketAgent.ts",
+    "example:coordinator": "tsx examples/coordinatorAgent.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.55.0",
@@ -37,6 +37,7 @@
     "supertest": "^7.2.2",
     "ts-jest": "^29.1.2",
     "ts-node": "^10.9.2",
+    "tsx": "^4.21.0",
     "typescript": "^5.4.0"
   }
 }

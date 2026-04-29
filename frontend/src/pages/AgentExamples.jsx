@@ -20,7 +20,8 @@ npm run example:support
 npm run examples:all`}
       </pre>
       <p className="agent-examples-hint">
-        Or: <code className="agent-examples-code">npx ts-node --project examples/tsconfig.json examples/supportAgent.ts</code>
+        Or: <code className="agent-examples-code">npx tsx examples/supportAgent.ts</code>
+        {' '}(<code className="agent-examples-code">ts-node</code> is available as a dev dependency if you standardize on it locally.)
       </p>
       <div className="agent-examples-grid">
         {examples.map((e) => (
