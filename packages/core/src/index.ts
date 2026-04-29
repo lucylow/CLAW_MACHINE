@@ -136,3 +136,52 @@ export const FRAMEWORK_VERSION = "0.6.0";
 
 // ── v6: Framework runtime layer ─────────────────────────────────────────────
 export * as framework from "./framework/index.js";
+
+/** OpenClaw-aligned manifest discovery, slots, validation, CLI helpers */
+export * as openclawPlugins from "./openclaw-plugins/index.js";
+
+// ── Episode + reflection memory (durable failure → reflection → recall) ─────
+export type {
+  MemoryTier,
+  AgentEpisode,
+  ReflectionRecord,
+  MemoryQuery,
+  MemoryRecallResult,
+  MemoryWriteResult,
+} from "./memory/types.js";
+export type { MemoryProvider } from "./memory/provider.js";
+export { MemoryOrchestrator } from "./memory/orchestrator.js";
+export type { PrunePolicy } from "./memory/pruner.js";
+export { MemoryPruner } from "./memory/pruner.js";
+export { MemoryHealthMonitor } from "./memory/health.js";
+export { SimpleVectorIndex } from "./memory/vector-index.js";
+export type { IndexedItem } from "./memory/vector-index.js";
+export { VectorIndex } from "./memory/vector/index.js";
+export { PrunerWorker } from "./memory/worker/pruner.js";
+
+export type { ReflectionPromptInput, ReflectionOutput } from "./reflection/schema.js";
+export type { LlmClient } from "./reflection/engine.js";
+export { ReflectionEngine } from "./reflection/engine.js";
+
+export { ZeroGClient } from "./adapters/zero-g/client.js";
+export type { ZeroGClientConfig } from "./adapters/zero-g/client.js";
+export { ZeroGAuth } from "./adapters/zero-g/auth.js";
+export { ZeroGComputeAdapter } from "./adapters/zero-g/compute.js";
+export type { ZeroGComputeAdapterConfig } from "./adapters/zero-g/compute.js";
+export { ZeroGStorageAdapter } from "./adapters/zero-g/storage.js";
+export type { ZeroGClientLike } from "./adapters/zero-g/memory-adapter.js";
+export { ZeroGMemoryAdapter } from "./adapters/zero-g/memory-adapter.js";
+export { InMemoryMemoryProvider } from "./adapters/mock/in-memory-memory.js";
+
+export type { TraceEvent } from "./session/tracer.js";
+export { SessionTracer } from "./session/tracer.js";
+
+export { AgentRuntime } from "./agent/runtime.js";
+export type { AgentRuntimeDeps } from "./agent/runtime.js";
+export { LessonInjector } from "./agent/lesson-injector.js";
+
+export type { OpenClawLikeAgent } from "./integration/openclaw-hook.js";
+export { wrapOpenClawAgent } from "./integration/openclaw-hook.js";
+
+export type { AppConfig } from "./config.js";
+export { loadConfig } from "./config.js";

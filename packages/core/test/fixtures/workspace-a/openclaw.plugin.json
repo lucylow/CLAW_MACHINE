@@ -1,0 +1,7 @@
+{
+  "id": "fixture-a",
+  "name": "Fixture A",
+  "kind": "native",
+  "entry": "./index.js",
+  "capabilities": ["demo"]
+}
