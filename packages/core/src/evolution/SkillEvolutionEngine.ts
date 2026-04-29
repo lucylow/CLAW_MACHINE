@@ -377,9 +377,9 @@ RULES:
           })(input, ctx).then(r => { result = r; });
         `;
 
-        const script = new vm.Script(fnCode, { timeout: 5000 });
+        const script = new vm.Script(fnCode);
         const context = vm.createContext(sandbox);
-        await script.runInContext(context);
+        await script.runInContext(context, { timeout: 5000 });
 
         // Wait for async result (up to 3s)
         let waited = 0;
@@ -464,9 +464,9 @@ RULES:
             ${code}
           })(input, ctx).then(r => { result = r; });
         `;
-        const script = new vm.Script(fnCode, { timeout: 10_000 });
+        const script = new vm.Script(fnCode);
         const context = vm.createContext(sandbox);
-        await script.runInContext(context);
+        await script.runInContext(context, { timeout: 10_000 });
 
         let waited = 0;
         while (sandbox.result === undefined && waited < 8000) {

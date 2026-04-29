@@ -111,6 +111,7 @@ export type {
   ProcessedInput,
   ModalityType,
 } from "./multimodal/MultiModalProcessor.js";
+export * from "./multimodal/index.js";
 
 // ── v6: Agent-to-agent messaging ──────────────────────────────────────────
 export { AgentBus } from "./agentbus/AgentBus.js";
@@ -124,10 +125,14 @@ export type {
 // ── v6: Self-evolving skill engine ────────────────────────────────────────
 export { SkillEvolutionEngine } from "./evolution/SkillEvolutionEngine.js";
 export type {
-  EvolveRequest,
-  EvolveResult,
+  EvolutionRequest,
+  EvolutionResult,
   EvolvedSkillRecord,
 } from "./evolution/SkillEvolutionEngine.js";
+export * as evolution from "./evolution/index.js";
 
 /** Framework version */
 export const FRAMEWORK_VERSION = "0.6.0";
+
+// ── v6: Framework runtime layer ─────────────────────────────────────────────
+export * as framework from "./framework/index.js";

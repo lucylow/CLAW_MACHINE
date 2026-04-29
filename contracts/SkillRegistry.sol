@@ -3,13 +3,15 @@ pragma solidity ^0.8.24;
 
 /**
  * @title SkillRegistry
- * @notice On-chain registry for CLAW_MACHINE agent skills on 0G Network (chainId 16600).
+ * @notice On-chain registry for CLAW_MACHINE agent skills on EVM-compatible networks.
  *
  * Skills are published with a content hash pointing to code stored on 0G Storage.
  * Any agent can discover, verify, and load skills from this registry.
  *
- * Deploy to 0G Newton Testnet:
- *   npx hardhat run scripts/deploy.ts --network zerog
+ * Deployment chain id is intentionally NOT hard-coded here.
+ * Keep network selection in deploy/runtime configuration so environments can
+ * target the currently documented 0G mainnet/testnet values without
+ * contract changes.
  */
 contract SkillRegistry {
     // ── Events ────────────────────────────────────────────────────────────────
@@ -109,7 +111,8 @@ contract SkillRegistry {
         require(tags.length <= 10, "SkillRegistry: too many tags");
         require(_idToKey[id] == bytes32(0), "SkillRegistry: id already registered");
 
-        skillKey = keccak256(abi.encodePacked(id, msg.sender));
+        // Include chainid to avoid cross-network key collisions for the same id/author pair.
+        skillKey = keccak256(abi.encodePacked(block.chainid, id, msg.sender));
 
         _skills[skillKey] = Skill({
             id:              id,

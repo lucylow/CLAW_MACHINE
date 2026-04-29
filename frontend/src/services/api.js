@@ -37,9 +37,15 @@ export class ApiClientError extends Error {
 
 // Attach wallet address to every request if available
 client.interceptors.request.use((config) => {
-  const wallet = localStorage.getItem('oa_wallet');
-  if (wallet) config.headers['x-wallet-address'] = wallet;
-  config.headers['x-request-id'] = config.headers['x-request-id'] || genRequestId();
+  const headers = config.headers || {};
+  try {
+    const wallet = typeof window !== 'undefined' ? localStorage.getItem('oa_wallet') : null;
+    if (wallet) headers['x-wallet-address'] = wallet;
+  } catch (_err) {
+    // Continue without wallet header when storage access is blocked.
+  }
+  headers['x-request-id'] = headers['x-request-id'] || genRequestId();
+  config.headers = headers;
   return config;
 });
 
@@ -53,17 +59,19 @@ client.interceptors.response.use(
     return payload;
   },
   (err) => {
-    const data = err.response?.data;
+    const safeErr = err || {};
+    const data = safeErr.response?.data;
     const normalized = data?.error || {};
+    const isOffline = typeof navigator !== 'undefined' && navigator && navigator.onLine === false;
     const error = new ApiClientError({
-      code: normalized.code || (err.code === 'ECONNABORTED' ? 'NET_001_TIMEOUT' : 'NET_000_REQUEST_FAILED'),
-      message: normalized.message || err.message || 'Request failed',
-      category: normalized.category || (!navigator.onLine ? 'external' : 'internal'),
+      code: normalized.code || (safeErr.code === 'ECONNABORTED' ? 'NET_001_TIMEOUT' : 'NET_000_REQUEST_FAILED'),
+      message: normalized.message || safeErr.message || 'Request failed',
+      category: normalized.category || (isOffline ? 'external' : 'internal'),
       recoverable: typeof normalized.recoverable === 'boolean' ? normalized.recoverable : true,
-      retryable: typeof normalized.retryable === 'boolean' ? normalized.retryable : err.code === 'ECONNABORTED',
-      requestId: normalized.requestId || err.response?.headers?.['x-request-id'],
+      retryable: typeof normalized.retryable === 'boolean' ? normalized.retryable : safeErr.code === 'ECONNABORTED',
+      requestId: normalized.requestId || safeErr.response?.headers?.['x-request-id'],
       details: normalized.details || {},
-      status: err.response?.status,
+      status: safeErr.response?.status,
     });
     return Promise.reject(error);
   }

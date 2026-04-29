@@ -11,7 +11,7 @@
  * Uses a lightweight custom canvas (no external graph library dep).
  */
 
-import { useState, useRef, useCallback, useEffect } from "react";
+import { useState, useRef, useCallback, useEffect, useMemo } from "react";
 import client from "../services/api.js";
 
 // ── Node types ────────────────────────────────────────────────────────────────
@@ -38,6 +38,20 @@ const PALETTE_ITEMS = [
 
 let nodeIdCounter = 1;
 function newNodeId() { return `node-${nodeIdCounter++}`; }
+function newEdgeId() { return `edge-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`; }
+
+function parseJSON(text, fallback) {
+  try {
+    return JSON.parse(text);
+  } catch {
+    return fallback;
+  }
+}
+
+function parseNumber(value, fallback) {
+  const n = Number(value);
+  return Number.isFinite(n) ? n : fallback;
+}
 
 // ── Component ─────────────────────────────────────────────────────────────────
 
@@ -48,13 +62,13 @@ export default function Builder() {
   ]);
   const [edges, setEdges] = useState([]);
   const [selected, setSelected] = useState(null);
-  const [dragging, setDragging] = useState(null);
   const [connecting, setConnecting] = useState(null); // { fromId }
   const [skills, setSkills] = useState([]);
   const [deploying, setDeploying] = useState(false);
   const [deployResult, setDeployResult] = useState(null);
   const [showCode, setShowCode] = useState(false);
   const canvasRef = useRef(null);
+  const [validationErrors, setValidationErrors] = useState([]);
 
   // Load available skills
   useEffect(() => {
@@ -62,6 +76,21 @@ export default function Builder() {
       setSkills((r.data?.payload?.skills || r.data?.skills || []).slice(0, 20));
     }).catch(() => {});
   }, []);
+
+  useEffect(() => {
+    const errors = [];
+    if (!nodes.some((n) => n.type === "trigger")) {
+      errors.push("Pipeline needs a trigger node.");
+    }
+    if (!nodes.some((n) => n.type === "output")) {
+      errors.push("Pipeline needs an output node.");
+    }
+    const hasSkillWithoutBinding = nodes.some((n) => n.type === "skill" && !n.config?.skillId);
+    if (hasSkillWithoutBinding) {
+      errors.push("Every skill node must select a skill.");
+    }
+    setValidationErrors(errors);
+  }, [nodes]);
 
   // ── Drag from palette ──────────────────────────────────────────────────────
 
@@ -73,7 +102,8 @@ export default function Builder() {
     e.preventDefault();
     const raw = e.dataTransfer.getData("palette-item");
     if (!raw) return;
-    const item = JSON.parse(raw);
+    const item = parseJSON(raw, null);
+    if (!item || !item.type || !item.label) return;
     const rect = canvasRef.current.getBoundingClientRect();
     const x = e.clientX - rect.left - 60;
     const y = e.clientY - rect.top - 24;
@@ -127,7 +157,7 @@ export default function Builder() {
         setEdges(prev => {
           const exists = prev.some(ed => ed.from === connecting.fromId && ed.to === nodeId);
           if (exists) return prev;
-          return [...prev, { id: `e-${Date.now()}`, from: connecting.fromId, to: nodeId }];
+          return [...prev, { id: newEdgeId(), from: connecting.fromId, to: nodeId }];
         });
       }
       setConnecting(null);
@@ -219,19 +249,29 @@ export default function Builder() {
 
   const selectedNode = nodes.find(n => n.id === selected);
   const nodeType = selectedNode ? NODE_TYPES[selectedNode.type] : null;
+  const nodeById = useMemo(() => new Map(nodes.map((n) => [n.id, n])), [nodes]);
 
   // Compute edge SVG paths
-  const edgePaths = edges.map(edge => {
-    const from = nodes.find(n => n.id === edge.from);
-    const to = nodes.find(n => n.id === edge.to);
-    if (!from || !to) return null;
-    const x1 = from.x + 120;
-    const y1 = from.y + 24;
-    const x2 = to.x;
-    const y2 = to.y + 24;
-    const cx = (x1 + x2) / 2;
-    return { ...edge, path: `M ${x1} ${y1} C ${cx} ${y1}, ${cx} ${y2}, ${x2} ${y2}` };
-  }).filter(Boolean);
+  const edgePaths = useMemo(() => {
+    return edges.map((edge) => {
+      const from = nodeById.get(edge.from);
+      const to = nodeById.get(edge.to);
+      if (!from || !to) return null;
+      const x1 = from.x + 120;
+      const y1 = from.y + 24;
+      const x2 = to.x;
+      const y2 = to.y + 24;
+      const cx = (x1 + x2) / 2;
+      return {
+        ...edge,
+        from,
+        to,
+        path: `M ${x1} ${y1} C ${cx} ${y1}, ${cx} ${y2}, ${x2} ${y2}`,
+        midX: x1 + (x2 - x1) / 2,
+        midY: y1 + (y2 - y1) / 2,
+      };
+    }).filter(Boolean);
+  }, [edges, nodeById]);
 
   return (
     <div className="builder-page">
@@ -249,7 +289,7 @@ export default function Builder() {
           <button
             className="builder-btn primary"
             onClick={deploy}
-            disabled={deploying}
+            disabled={deploying || validationErrors.length > 0}
           >
             {deploying ? "Deploying…" : "⚡ Deploy to 0G"}
           </button>
@@ -294,6 +334,11 @@ export default function Builder() {
           onDragOver={e => e.preventDefault()}
           onClick={onCanvasClick}
         >
+          {validationErrors.length > 0 && (
+            <div className="builder-connecting-hint" style={{ top: 12 }}>
+              {validationErrors[0]}
+            </div>
+          )}
           {/* SVG edges */}
           <svg className="builder-edges" style={{ position: "absolute", inset: 0, pointerEvents: "none", width: "100%", height: "100%" }}>
             {edgePaths.map(edge => (
@@ -307,8 +352,8 @@ export default function Builder() {
                   opacity={0.7}
                 />
                 <circle
-                  cx={(nodes.find(n => n.id === edge.from)?.x ?? 0) + 120 + ((nodes.find(n => n.id === edge.to)?.x ?? 0) - (nodes.find(n => n.id === edge.from)?.x ?? 0) - 120) / 2}
-                  cy={(nodes.find(n => n.id === edge.from)?.y ?? 0) + 24 + ((nodes.find(n => n.id === edge.to)?.y ?? 0) - (nodes.find(n => n.id === edge.from)?.y ?? 0)) / 2}
+                  cx={edge.midX}
+                  cy={edge.midY}
                   r={7}
                   fill="#1e1e2e"
                   stroke="#6366f1"
@@ -441,7 +486,7 @@ export default function Builder() {
                     type="number"
                     min={0} max={2} step={0.1}
                     value={selectedNode.config.temperature ?? 0.7}
-                    onChange={e => updateConfig(selectedNode.id, "temperature", parseFloat(e.target.value))}
+                    onChange={e => updateConfig(selectedNode.id, "temperature", parseNumber(e.target.value, 0.7))}
                   />
                 </>
               )}
@@ -461,7 +506,7 @@ export default function Builder() {
                     type="number"
                     min={1} max={20}
                     value={selectedNode.config.limit ?? 5}
-                    onChange={e => updateConfig(selectedNode.id, "limit", parseInt(e.target.value))}
+                    onChange={e => updateConfig(selectedNode.id, "limit", parseNumber(e.target.value, 5))}
                   />
                 </>
               )}
@@ -482,7 +527,7 @@ export default function Builder() {
                     type="number"
                     min={0} max={1} step={0.05}
                     value={selectedNode.config.minScore ?? 0.6}
-                    onChange={e => updateConfig(selectedNode.id, "minScore", parseFloat(e.target.value))}
+                    onChange={e => updateConfig(selectedNode.id, "minScore", parseNumber(e.target.value, 0.6))}
                   />
                 </>
               )}

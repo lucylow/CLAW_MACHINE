@@ -24,6 +24,11 @@ import { HierarchicalPlanner } from "./core/HierarchicalPlanner";
 import { PruningService } from "./core/PruningService";
 import { createPlannerRouter } from "./routes/planner";
 import { createOpenClawRouter } from "./routes/openclaw";
+import { SkillEvolutionEngine } from "./core/evolution/SkillEvolutionEngine";
+import { OnChainSkillRegistry } from "./onchain/OnChainSkillRegistry";
+import { createEvolutionRouter } from "./routes/evolution";
+import { createOnChainRouter } from "./routes/onchain";
+import { createBuilderRouter } from "./routes/builder";
 
 dotenv.config();
 
@@ -52,7 +57,17 @@ const chainRegistry = new OnChainSkillRegistry({
   contractAddress: process.env.CONTRACT_ADDRESS || "0x0000000000000000000000000000000000000000",
   privateKey: process.env.PRIVATE_KEY,
 });
-chainRegistry.connect().catch(() => {});
+chainRegistry.connect().catch((err: unknown) => {
+  const normalized = normalizeError(err, { operation: "onchain.registry.connect", category: "chain", retryable: true });
+  console.warn(
+    JSON.stringify({
+      level: "warn",
+      message: "On-chain registry connect failed; continuing in degraded mode",
+      code: normalized.code,
+      details: normalized.details,
+    }),
+  );
+});
 console.log(JSON.stringify({ level: "info", message: "0G adapters ready", storageMode: zgStorage.getStats().mode, computeMode: zgCompute.getMode() }));
 
 const walletRegistry = new Map<string, { registeredAt: number; signature: string }>();
@@ -329,7 +344,17 @@ app.post("/api/memory/orchestrator/reflect", safeAsync(async (req: Request, res:
 setInterval(() => {
   pruningService.maybePrune().then((r) => {
     if (r) console.log(JSON.stringify({ level: "info", message: "Memory pruned", evicted: r.evicted, summarized: r.summarized, durationMs: r.durationMs }));
-  }).catch(() => {});
+  }).catch((err: unknown) => {
+    const normalized = normalizeError(err, { operation: "memory.prune", category: "memory", retryable: true });
+    console.warn(
+      JSON.stringify({
+        level: "warn",
+        message: "Periodic memory pruning failed",
+        code: normalized.code,
+        details: normalized.details,
+      }),
+    );
+  });
 }, 5 * 60 * 1000);
 
 // ── SSE Streaming endpoint ────────────────────────────────────────────────

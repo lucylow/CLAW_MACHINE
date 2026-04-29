@@ -10,7 +10,7 @@
  *   - listChainSkills()   — paginated list of all on-chain skills
  *   - watchNewSkills()    — subscribe to SkillPublished events in real-time
  *
- * Uses ethers.js v6 with the 0G Newton Testnet (chainId 16600).
+ * Uses ethers.js v6 against a configurable 0G/EVM RPC endpoint.
  * Falls back to mock mode when PRIVATE_KEY is not set.
  */
 
@@ -72,6 +72,7 @@ export interface PublishSkillParams {
 }
 
 export interface OnChainRegistryConfig {
+  chainId?: number;
   rpcUrl: string;
   contractAddress: string;
   privateKey?: string;
@@ -101,7 +102,7 @@ export class OnChainSkillRegistry extends EventEmitter {
     try {
       // Dynamic import of ethers to avoid hard dep in environments without it
       const { ethers } = await import("ethers");
-      this.provider = new (ethers as any).JsonRpcProvider(this.config.rpcUrl);
+      this.provider = new (ethers as any).JsonRpcProvider(this.config.rpcUrl, this.config.chainId);
       this.signer = new (ethers as any).Wallet(this.config.privateKey!, this.provider as any);
       this.contract = new (ethers as any).Contract(
         this.config.contractAddress,
@@ -119,6 +120,10 @@ export class OnChainSkillRegistry extends EventEmitter {
    * Returns the transaction hash (or mock hash in mock mode).
    */
   async publishSkill(params: PublishSkillParams): Promise<{ txHash: string; skillKey: string }> {
+    if (!params.id?.trim()) throw new Error("publishSkill: id is required");
+    if (!params.name?.trim()) throw new Error("publishSkill: name is required");
+    if (!params.contentHash?.trim()) throw new Error("publishSkill: contentHash is required");
+
     if (this.isMock || !this.contract) {
       const mockKey = `0x${Buffer.from(params.id).toString("hex").padEnd(64, "0")}`;
       const skill: ChainSkill = {
@@ -153,8 +158,9 @@ export class OnChainSkillRegistry extends EventEmitter {
       params.usesStorage ?? false,
     );
     const receipt = await tx.wait();
-    const log = receipt.logs[0];
-    const skillKey = log?.topics?.[1] ?? "0x0";
+    // Read canonical skill key from contract mapping instead of assuming
+    // a specific log position in transaction receipts.
+    const skillKey = await c.getSkillKey(params.id);
     return { txHash: receipt.hash, skillKey };
   }
 
