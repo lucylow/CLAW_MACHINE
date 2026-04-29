@@ -6,6 +6,8 @@ dist/
 *.log
 frontend/dist/
 backend/dist/
+backend/data/snapshots/
+data/snapshots/
 playwright/.auth/
 playwright-report/
 test-results/

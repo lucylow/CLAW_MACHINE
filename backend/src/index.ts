@@ -33,3 +33,5 @@ export { MemoryOrchestrator } from "./core/memory/memory-orchestrator";
 export { ReflectionEngine as ProviderReflectionEngine } from "./core/reflection/reflection-engine";
 export { RuntimeRouter } from "./core/router";
 export { ProviderAgentRuntime } from "./core/agent-runtime";
+export * from "./a2a";
+export * from "./a2a";

@@ -2,11 +2,13 @@ import express, { NextFunction, Request, Response } from "express";
 import cors from "cors";
 import dotenv from "dotenv";
 import { randomUUID } from "crypto";
+import path from "node:path";
 import { readConfig } from "./config/env";
 import { ComputeProvider } from "./providers/ComputeProvider";
 import { StorageProvider } from "./providers/StorageProvider";
 import { EventBus } from "./events/EventBus";
 import { MemoryStore } from "./memory/MemoryStore";
+import { AgentMemorySnapshotAdapter, createDefaultSnapshotService, MemorySnapshotService } from "./memory/snapshots";
 import { ReflectionEngine } from "./reflection/ReflectionEngine";
 import { SkillRegistry } from "./skills/SkillRegistry";
 import { AgentRuntime } from "./core/AgentRuntime";
@@ -29,6 +31,11 @@ import { OnChainSkillRegistry } from "./onchain/OnChainSkillRegistry";
 import { createEvolutionRouter } from "./routes/evolution";
 import { createOnChainRouter } from "./routes/onchain";
 import { createBuilderRouter } from "./routes/builder";
+import { createDeployZeroGRouter } from "./routes/deploy-zero-g";
+import { createMultimodalRoutes } from "./api/multimodal";
+import { MultimodalReasoningPipeline } from "./multimodal/multimodal-reasoning";
+import { FileMultimodalMemoryStore } from "./memory/multimodal-memory";
+import { MockZeroGMultimodalComputeClient, ZeroGComputeMultimodalAdapter } from "./providers/zeroGCompute";
 
 dotenv.config();
 
@@ -41,7 +48,16 @@ const skills = new SkillRegistry();
 const compute = new ComputeProvider(null, config.computeMode);
 const storage = new StorageProvider(process.env.OG_STORAGE_RPC || "memory://0g");
 const reflection = new ReflectionEngine("qwen3.6-plus");
-const runtime = new AgentRuntime(compute, storage, skills, memory, reflection, events);
+
+const memorySnapshotsEnabled = process.env.MEMORY_SNAPSHOTS_ENABLED !== "false";
+const memorySnapshotService: MemorySnapshotService | null = memorySnapshotsEnabled
+  ? createDefaultSnapshotService({
+      directory: process.env.MEMORY_SNAPSHOTS_DIR || path.join(process.cwd(), "data", "snapshots"),
+    })
+  : null;
+const memorySnapshotAdapter = memorySnapshotService ? new AgentMemorySnapshotAdapter(memorySnapshotService) : undefined;
+
+const runtime = new AgentRuntime(compute, storage, skills, memory, reflection, events, memorySnapshotAdapter);
 
 // ── v4 adapters (0G Storage KV/Log, 0G Compute TEE, OpenClaw bridge) ────────
 const zgStorage = new ZeroGStorageAdapter();
@@ -69,6 +85,27 @@ chainRegistry.connect().catch((err: unknown) => {
   );
 });
 console.log(JSON.stringify({ level: "info", message: "0G adapters ready", storageMode: zgStorage.getStats().mode, computeMode: zgCompute.getMode() }));
+
+const multimodalMemory = new FileMultimodalMemoryStore({
+  directory: process.env.MULTIMODAL_MEMORY_DIR || path.join(process.cwd(), "data", "multimodal-memory"),
+});
+const multimodalEndpoint = process.env.ZERO_G_MULTIMODAL_ENDPOINT?.trim();
+const multimodalCompute =
+  multimodalEndpoint && multimodalEndpoint.length > 0
+    ? new ZeroGComputeMultimodalAdapter({
+        endpoint: multimodalEndpoint,
+        apiKey: process.env.ZERO_G_MULTIMODAL_API_KEY,
+      })
+    : new MockZeroGMultimodalComputeClient();
+const multimodalPipeline = new MultimodalReasoningPipeline({
+  compute: multimodalCompute,
+  memory: multimodalMemory,
+  events: {
+    emit: (eventName, payload) =>
+      events.emit(eventName, payload, typeof payload.requestId === "string" ? payload.requestId : undefined),
+  },
+  fallbackMode: config.nodeEnv === "production" ? "disabled" : "mock",
+});
 
 const walletRegistry = new Map<string, { registeredAt: number; signature: string }>();
 const walletConfig = new Map<string, Record<string, unknown>>();
@@ -307,6 +344,8 @@ app.get("/api/agent/status", (_req: Request, res: Response) => {
 // Skills management router (GET/POST /:id/enable|disable)
 app.use("/api/agent/skills", createSkillsRouter(skills));
 
+app.use("/api/agent/multimodal", createMultimodalRoutes({ pipeline: multimodalPipeline }));
+
 // Memory search & management router
 app.use("/api/memory", createMemoryRouter(memory));
 
@@ -487,7 +526,8 @@ app.put("/api/wallet/:addr/config", (req: Request, res: Response) => {
 // ── v6 routes ────────────────────────────────────────────────────────────────
 app.use("/api/evolution", createEvolutionRouter(evolutionEngine, chainRegistry));
 app.use("/api/onchain",   createOnChainRouter(chainRegistry));
-app.use("/api/builder",   createBuilderRouter());
+app.use("/api/builder", createBuilderRouter());
+app.use("/api/deploy", createDeployZeroGRouter());
 
 app.use((_req: Request) => {
   throw new NotFoundError("Endpoint not found");
@@ -521,9 +561,7 @@ app.use((err: unknown, req: Request, res: Response, _next: NextFunction) => {
   res.status(enriched.statusCode).json(toApiErrorResponse(enriched, requestId));
 });
 
-const server = app.listen(config.port, () => {
-  console.log(`OpenAgents backend listening on http://localhost:${config.port}`);
-});
+let server: ReturnType<typeof app.listen>;
 
 function shutdown(signal: string) {
   console.warn(JSON.stringify({ level: "warn", signal, message: "Graceful shutdown started" }));
@@ -536,5 +574,39 @@ function shutdown(signal: string) {
 
 process.on("SIGINT", () => shutdown("SIGINT"));
 process.on("SIGTERM", () => shutdown("SIGTERM"));
+
+async function startServer(): Promise<void> {
+  if (memorySnapshotService) {
+    try {
+      await memorySnapshotService.init();
+      const { migrated, compacted } = await memorySnapshotService.migrateAllSnapshots();
+      console.log(
+        JSON.stringify({
+          level: "info",
+          message: "Memory snapshots ready",
+          migrated,
+          compacted,
+          directory: process.env.MEMORY_SNAPSHOTS_DIR || path.join(process.cwd(), "data", "snapshots"),
+        }),
+      );
+    } catch (err) {
+      const normalized = normalizeError(err, { operation: "memory.snapshots.bootstrap", category: "memory", retryable: true });
+      console.warn(
+        JSON.stringify({
+          level: "warn",
+          message: "Memory snapshot init/migrate failed; continuing without disk snapshots",
+          code: normalized.code,
+          details: normalized.details,
+        }),
+      );
+    }
+  }
+
+  server = app.listen(config.port, () => {
+    console.log(`OpenAgents backend listening on http://localhost:${config.port}`);
+  });
+}
+
+void startServer();
 
 export default app;

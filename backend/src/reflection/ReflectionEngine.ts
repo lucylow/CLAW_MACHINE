@@ -66,22 +66,36 @@ Return JSON: { "rootCause": string, "mistakeSummary": string, "correctiveAdvice"
   }
 
   private generateRuleBased(params: any): ReflectionRecord | null {
-    if (params.success && !params.errorMessage) return null;
+    const isSuccess = params.success && !params.errorMessage;
     const reflection: ReflectionRecord = {
       reflectionId: randomUUID(),
       sourceTurnId: params.sourceTurnId,
       taskType: params.taskType,
-      result: params.success ? "success" : "failure",
-      rootCause: params.errorMessage ? "Skill/runtime failure" : "Outcome review trigger",
-      mistakeSummary: params.errorMessage || "Response quality was low or ambiguous.",
+      result: isSuccess ? "success" : "failure",
+      rootCause: params.errorMessage
+        ? "Skill/runtime failure"
+        : isSuccess
+          ? "No failure detected"
+          : "Outcome review trigger",
+      mistakeSummary: params.errorMessage
+        ? String(params.errorMessage)
+        : isSuccess
+          ? "No corrective action needed"
+          : "Response quality was low or ambiguous.",
       correctiveAdvice: params.selectedSkill
-        ? `Validate input and add fallback path before running ${params.selectedSkill}.`
-        : "Ask clarifying questions and use conservative defaults.",
-      confidence: params.success ? 0.62 : 0.88,
-      severity: params.success ? "low" : "high",
-      tags: [params.taskType, params.selectedSkill || "general", params.success ? "post_success" : "post_failure"],
+        ? isSuccess
+          ? `Reinforce successful use of ${params.selectedSkill}.`
+          : `Validate input and add fallback path before running ${params.selectedSkill}.`
+        : isSuccess
+          ? "Reinforce the successful pattern"
+          : "Ask clarifying questions and use conservative defaults.",
+      confidence: isSuccess ? 0.62 : 0.88,
+      severity: isSuccess ? "low" : "high",
+      tags: [params.taskType, params.selectedSkill || "general", isSuccess ? "post_success" : "post_failure"],
       relatedMemoryIds: params.relatedMemoryIds || [],
-      nextBestAction: params.success ? "Persist useful artifacts and continue." : "Retry with safer parameters or alternate skill.",
+      nextBestAction: isSuccess
+        ? "Persist useful artifacts and continue."
+        : "Retry with safer parameters or alternate skill.",
       createdAt: Date.now(),
       model: this.modelName,
       computeRef: "local-reflection-engine",

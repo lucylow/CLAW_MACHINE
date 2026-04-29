@@ -3,9 +3,13 @@ import { ComputeProvider } from "../providers/ComputeProvider";
 import { StorageProvider } from "../providers/StorageProvider";
 import { EventBus } from "../events/EventBus";
 import { MemoryStore } from "../memory/MemoryStore";
+import {
+  AgentMemorySnapshotAdapter,
+  ConversationTurnPayloadV1,
+} from "../memory/snapshots";
 import { ReflectionEngine } from "../reflection/ReflectionEngine";
 import { SkillRegistry } from "../skills/SkillRegistry";
-import { AgentTurnInput, AgentTurnResult } from "../types/runtime";
+import { AgentTurnInput, AgentTurnResult, ReflectionRecord } from "../types/runtime";
 import { normalizeError } from "../errors/normalize";
 
 export class AgentRuntime {
@@ -16,6 +20,7 @@ export class AgentRuntime {
     private readonly memory: MemoryStore,
     private readonly reflection: ReflectionEngine,
     private readonly events: EventBus,
+    private readonly snapshotAdapter?: AgentMemorySnapshotAdapter,
   ) {}
 
   async runTurn(input: AgentTurnInput, requestId?: string): Promise<AgentTurnResult> {
@@ -79,6 +84,7 @@ export class AgentRuntime {
       trace.push(`phase_error:${phase}:${normalized.code}`);
       trace.push("fallback:activated");
       this.events.emit("fallback.activated", { turnId, errorCode: normalized.code, errorMessage }, requestId);
+      await this.persistErrorSnapshot(input, requestId, normalized.code, normalized.message, normalized.category, normalized.recoverable, normalized.retryable, turnId);
     }
 
     const turnMemory = this.memory.store({
@@ -96,6 +102,44 @@ export class AgentRuntime {
       reflectionRefs: [],
     });
     memoryIds.push(turnMemory.id);
+
+    const snapshotContext = {
+      sessionId: input.sessionId,
+      walletAddress: input.walletAddress ?? null,
+      userId: null as string | null,
+      requestId: requestId ?? null,
+      traceId: null as string | null,
+    };
+
+    let turnSnapshotId: string | undefined;
+    if (this.snapshotAdapter) {
+      try {
+        const turnSnap = await this.snapshotAdapter.saveTurn({
+          context: snapshotContext,
+          prompt: input.input,
+          response: output,
+          selectedSkills: selectedSkill ? [selectedSkill] : [],
+          toolCalls: this.buildSnapshotToolCalls({
+            selectedSkill,
+            prompt: input.input,
+            output,
+            failed,
+            errorMessage,
+            txHash,
+          }),
+        });
+        turnSnapshotId = turnSnap.id;
+      } catch (snapErr) {
+        console.warn(
+          JSON.stringify({
+            level: "warn",
+            message: "Memory snapshot turn write failed",
+            operation: "agent.snapshot.turn",
+            details: snapErr instanceof Error ? snapErr.message : String(snapErr),
+          }),
+        );
+      }
+    }
 
     let reflection = null;
     try {
@@ -134,6 +178,26 @@ export class AgentRuntime {
         reflectionRefs: [reflection.reflectionId],
       });
       memoryIds.push(reflectionMemory.id);
+    }
+
+    if (this.snapshotAdapter && reflection) {
+      try {
+        await this.snapshotAdapter.saveReflection({
+          context: snapshotContext,
+          turnId: turnSnapshotId ?? turnMemory.id,
+          reflection: this.reflectionRecordToSnapshotPayload(reflection),
+          parentSnapshotId: turnSnapshotId ?? null,
+        });
+      } catch (snapErr) {
+        console.warn(
+          JSON.stringify({
+            level: "warn",
+            message: "Memory snapshot reflection write failed",
+            operation: "agent.snapshot.reflection",
+            details: snapErr instanceof Error ? snapErr.message : String(snapErr),
+          }),
+        );
+      }
     }
 
     let artifactHash = "";
@@ -201,5 +265,88 @@ export class AgentRuntime {
     if (lower.includes("reflection") || lower.includes("mistake")) return "reflection.summarize";
     if (lower.includes("swarm") || lower.includes("coordinate") || lower.includes("team")) return "agent.swarm";
     return undefined;
+  }
+
+  private buildSnapshotToolCalls(args: {
+    selectedSkill?: string;
+    prompt: string;
+    output: string;
+    failed: boolean;
+    errorMessage?: string;
+    txHash?: string;
+  }): ConversationTurnPayloadV1["toolCalls"] {
+    if (!args.selectedSkill) return [];
+    const base = { prompt: args.prompt };
+    if (args.failed) {
+      return [
+        {
+          toolName: args.selectedSkill,
+          status: "failure" as const,
+          input: base,
+          error: args.errorMessage ?? "execution failed",
+        },
+      ];
+    }
+    return [
+      {
+        toolName: args.selectedSkill,
+        status: "success" as const,
+        input: base,
+        output: { text: args.output, txHash: args.txHash },
+      },
+    ];
+  }
+
+  private reflectionRecordToSnapshotPayload(r: ReflectionRecord) {
+    return {
+      rootCause: r.rootCause,
+      mistakeSummary: r.mistakeSummary,
+      correctiveAdvice: r.correctiveAdvice,
+      severity: r.severity,
+      confidence: r.confidence,
+      relatedSnapshotIds: r.relatedMemoryIds,
+      lessonTags: r.tags,
+    };
+  }
+
+  private async persistErrorSnapshot(
+    input: AgentTurnInput,
+    requestId: string | undefined,
+    code: string,
+    message: string,
+    category: string,
+    recoverable: boolean,
+    retryable: boolean,
+    turnId: string,
+  ): Promise<void> {
+    if (!this.snapshotAdapter) return;
+    try {
+      await this.snapshotAdapter.saveErrorEvent({
+        context: {
+          sessionId: input.sessionId,
+          walletAddress: input.walletAddress ?? null,
+          userId: null,
+          requestId: requestId ?? null,
+          traceId: null,
+        },
+        payload: {
+          code,
+          message,
+          category,
+          recoverable,
+          retryable,
+          context: { turnId, phase: "execution" },
+        },
+      });
+    } catch (snapErr) {
+      console.warn(
+        JSON.stringify({
+          level: "warn",
+          message: "Memory snapshot error_event write failed",
+          operation: "agent.snapshot.error",
+          details: snapErr instanceof Error ? snapErr.message : String(snapErr),
+        }),
+      );
+    }
   }
 }
