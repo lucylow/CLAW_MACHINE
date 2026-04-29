@@ -13,7 +13,7 @@ import { ReflectionEngine } from "./reflection/ReflectionEngine";
 import { SkillRegistry } from "./skills/SkillRegistry";
 import { AgentRuntime } from "./core/AgentRuntime";
 import { AppError, NotFoundError, ValidationError } from "./errors/AppError";
-import { normalizeError, toApiErrorResponse } from "./errors/normalize";
+import { normalizeAppError, toApiErrorResponse } from "./errors/appNormalize";
 import { agentRunLimiter, globalLimiter } from "./middleware/rateLimiter";
 import { createSkillsRouter } from "./routes/skills";
 import { createMemoryRouter } from "./routes/memory";
@@ -33,6 +33,9 @@ import { createOnChainRouter } from "./routes/onchain";
 import { createBuilderRouter } from "./routes/builder";
 import { createDeployZeroGRouter } from "./routes/deploy-zero-g";
 import { createMultimodalRoutes } from "./api/multimodal";
+import { createSkillRegistryRoutes } from "./api/skillRegistryRoutes";
+import { SkillRegistryClient } from "./chain/skillRegistryClient";
+import type { Address } from "./chain/skillRegistryTypes";
 import { MultimodalReasoningPipeline } from "./multimodal/multimodal-reasoning";
 import { FileMultimodalMemoryStore } from "./memory/multimodal-memory";
 import { MockZeroGMultimodalComputeClient, ZeroGComputeMultimodalAdapter } from "./providers/zeroGCompute";
@@ -74,7 +77,7 @@ const chainRegistry = new OnChainSkillRegistry({
   privateKey: process.env.PRIVATE_KEY,
 });
 chainRegistry.connect().catch((err: unknown) => {
-  const normalized = normalizeError(err, { operation: "onchain.registry.connect", category: "chain", retryable: true });
+  const normalized = normalizeAppError(err, { operation: "onchain.registry.connect", category: "chain", retryable: true });
   console.warn(
     JSON.stringify({
       level: "warn",
@@ -106,6 +109,23 @@ const multimodalPipeline = new MultimodalReasoningPipeline({
   },
   fallbackMode: config.nodeEnv === "production" ? "disabled" : "mock",
 });
+
+const skillRegistryAddress = process.env.SKILL_REGISTRY_ADDRESS as Address | undefined;
+const skillRegistryRpc = process.env.SKILL_REGISTRY_RPC_URL;
+const skillRegistryChainId = Number(process.env.SKILL_REGISTRY_CHAIN_ID || "0");
+const skillRegistryWriteKey = process.env.SKILL_REGISTRY_PRIVATE_KEY;
+const skillRegistryClient =
+  skillRegistryAddress && skillRegistryRpc && Number.isFinite(skillRegistryChainId) && skillRegistryChainId > 0
+    ? (() => {
+        const base = new SkillRegistryClient({
+          chainId: skillRegistryChainId,
+          registryAddress: skillRegistryAddress,
+          rpcUrl: skillRegistryRpc,
+        });
+        const writeKey = skillRegistryWriteKey || process.env.PRIVATE_KEY;
+        return writeKey ? base.connectSigner(writeKey) : base;
+      })()
+    : null;
 
 const walletRegistry = new Map<string, { registeredAt: number; signature: string }>();
 const walletConfig = new Map<string, Record<string, unknown>>();
@@ -345,6 +365,25 @@ app.get("/api/agent/status", (_req: Request, res: Response) => {
 app.use("/api/agent/skills", createSkillsRouter(skills));
 
 app.use("/api/agent/multimodal", createMultimodalRoutes({ pipeline: multimodalPipeline }));
+if (skillRegistryClient) {
+  app.use(
+    "/api/skills/registry",
+    createSkillRegistryRoutes({
+      client: skillRegistryClient,
+      logger: {
+        info: (message, meta) => console.log(JSON.stringify({ level: "info", message, ...(meta || {}) })),
+        warn: (message, meta) => console.warn(JSON.stringify({ level: "warn", message, ...(meta || {}) })),
+        error: (message, meta) => console.error(JSON.stringify({ level: "error", message, ...(meta || {}) })),
+      },
+      requireAuth: async (req: Request) => {
+        const headerAddr = req.headers["x-wallet-address"];
+        const address = typeof headerAddr === "string" ? headerAddr : "";
+        if (!/^0x[a-fA-F0-9]{40}$/.test(address)) return null;
+        return { address: address as Address };
+      },
+    }),
+  );
+}
 
 // Memory search & management router
 app.use("/api/memory", createMemoryRouter(memory));
@@ -384,7 +423,7 @@ setInterval(() => {
   pruningService.maybePrune().then((r) => {
     if (r) console.log(JSON.stringify({ level: "info", message: "Memory pruned", evicted: r.evicted, summarized: r.summarized, durationMs: r.durationMs }));
   }).catch((err: unknown) => {
-    const normalized = normalizeError(err, { operation: "memory.prune", category: "memory", retryable: true });
+    const normalized = normalizeAppError(err, { operation: "memory.prune", category: "memory", retryable: true });
     console.warn(
       JSON.stringify({
         level: "warn",
@@ -422,7 +461,7 @@ app.post("/api/agent/stream", agentRunLimiter, safeAsync(async (req: Request, re
     emitPhase(sse, "complete", { degraded: result.degradedMode });
     emitResult(sse, result);
   } catch (err: unknown) {
-    const normalized = normalizeError(err, { operation: "stream" });
+    const normalized = normalizeAppError(err, { operation: "stream" });
     emitError(sse, normalized.code, normalized.message);
   } finally {
     unsubscribe();
@@ -535,7 +574,7 @@ app.use((_req: Request) => {
 
 app.use((err: unknown, req: Request, res: Response, _next: NextFunction) => {
   const requestId = (req as Request & { requestId?: string }).requestId;
-  const normalized = normalizeError(err, { operation: `${req.method.toLowerCase()} ${req.path}` });
+  const normalized = normalizeAppError(err, { operation: `${req.method.toLowerCase()} ${req.path}` });
   const enriched = new AppError({
     ...normalized,
     code: normalized.code,
@@ -590,7 +629,7 @@ async function startServer(): Promise<void> {
         }),
       );
     } catch (err) {
-      const normalized = normalizeError(err, { operation: "memory.snapshots.bootstrap", category: "memory", retryable: true });
+      const normalized = normalizeAppError(err, { operation: "memory.snapshots.bootstrap", category: "memory", retryable: true });
       console.warn(
         JSON.stringify({
           level: "warn",

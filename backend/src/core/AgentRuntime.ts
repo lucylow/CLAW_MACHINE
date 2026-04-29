@@ -10,7 +10,7 @@ import {
 import { ReflectionEngine } from "../reflection/ReflectionEngine";
 import { SkillRegistry } from "../skills/SkillRegistry";
 import { AgentTurnInput, AgentTurnResult, ReflectionRecord } from "../types/runtime";
-import { normalizeError } from "../errors/normalize";
+import { normalizeAppError } from "../errors/appNormalize";
 
 export class AgentRuntime {
   constructor(
@@ -37,7 +37,7 @@ export class AgentRuntime {
       trace.push(`phase:${phase}`);
       trace.push(`selected:${selectedSkill || "none"}`);
     } catch (error) {
-      const normalized = normalizeError(error, { code: "AGENT_001_RUNTIME_FAILURE", category: "agent", operation: "agent.selectSkill" });
+      const normalized = normalizeAppError(error, { code: "AGENT_001_RUNTIME_FAILURE", category: "agent", operation: "agent.selectSkill" });
       trace.push(`phase_error:${phase}:${normalized.code}`);
       selectedSkill = undefined;
     }
@@ -48,7 +48,7 @@ export class AgentRuntime {
       contextSummary = this.memory.summarize(input.sessionId);
       trace.push(`phase:${phase}`);
     } catch (error) {
-      const normalized = normalizeError(error, { code: "MEM_002_RETRIEVE_FAILED", category: "memory", operation: "agent.hydrateMemory", retryable: false });
+      const normalized = normalizeAppError(error, { code: "MEM_002_RETRIEVE_FAILED", category: "memory", operation: "agent.hydrateMemory", retryable: false });
       trace.push(`phase_warning:${phase}:${normalized.code}`);
     }
     this.events.emit("memory.hydrated", { turnId, contextSummary }, requestId);
@@ -78,7 +78,7 @@ export class AgentRuntime {
       }
     } catch (error) {
       failed = true;
-      const normalized = normalizeError(error, { code: "AGENT_001_RUNTIME_FAILURE", category: "agent", operation: `agent.${phase}` });
+      const normalized = normalizeAppError(error, { code: "AGENT_001_RUNTIME_FAILURE", category: "agent", operation: `agent.${phase}` });
       errorMessage = normalized.message;
       output = `I hit an execution issue: ${errorMessage}. I switched to safe fallback mode and stored this for future improvement.`;
       trace.push(`phase_error:${phase}:${normalized.code}`);
@@ -156,7 +156,7 @@ export class AgentRuntime {
       });
       trace.push(`phase:${phase}`);
     } catch (error) {
-      const normalized = normalizeError(error, { code: "REFL_001_GENERATION_FAILED", category: "reflection", operation: "agent.reflect" });
+      const normalized = normalizeAppError(error, { code: "REFL_001_GENERATION_FAILED", category: "reflection", operation: "agent.reflect" });
       trace.push(`phase_warning:${phase}:${normalized.code}`);
     }
 
@@ -207,7 +207,7 @@ export class AgentRuntime {
       this.events.emit("storage.write.completed", { turnId, artifactHash }, requestId);
       trace.push(`phase:${phase}`);
     } catch (error) {
-      const normalized = normalizeError(error, { code: "MEM_001_SAVE_FAILED", category: "memory", operation: "agent.persistResult", retryable: true });
+      const normalized = normalizeAppError(error, { code: "MEM_001_SAVE_FAILED", category: "memory", operation: "agent.persistResult", retryable: true });
       trace.push(`phase_warning:${phase}:${normalized.code}`);
     }
 

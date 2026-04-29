@@ -1,22 +1,22 @@
 import { AppError, ValidationError } from "./AppError";
-import { normalizeError, toApiErrorResponse } from "./normalize";
+import { normalizeAppError, toApiErrorResponse } from "./appNormalize";
 
-describe("normalizeError", () => {
+describe("normalizeAppError", () => {
   test("preserves AppError instance", () => {
     const err = new ValidationError("Bad request");
-    const out = normalizeError(err);
+    const out = normalizeAppError(err);
     expect(out).toBe(err);
   });
 
   test("normalizes native Error", () => {
-    const out = normalizeError(new Error("boom"), { code: "X_001", category: "internal" });
+    const out = normalizeAppError(new Error("boom"), { code: "X_001", category: "internal" });
     expect(out).toBeInstanceOf(AppError);
     expect(out.code).toBe("X_001");
     expect(out.message).toBe("boom");
   });
 
   test("normalizes string throw", () => {
-    const out = normalizeError("oops", { code: "X_002", category: "validation", statusCode: 400 });
+    const out = normalizeAppError("oops", { code: "X_002", category: "validation", statusCode: 400 });
     expect(out.code).toBe("X_002");
     expect(out.statusCode).toBe(400);
   });

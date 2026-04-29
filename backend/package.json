@@ -7,7 +7,14 @@
   "scripts": {
     "build": "tsc",
     "start": "node dist/server.js",
-    "test": "jest"
+    "test": "jest",
+    "examples:all": "ts-node --project examples/tsconfig.json examples/runAllExamples.ts",
+    "example:support": "ts-node --project examples/tsconfig.json examples/supportAgent.ts",
+    "example:research": "ts-node --project examples/tsconfig.json examples/researchAgent.ts",
+    "example:planner": "ts-node --project examples/tsconfig.json examples/plannerAgent.ts",
+    "example:ops": "ts-node --project examples/tsconfig.json examples/opsAgent.ts",
+    "example:market": "ts-node --project examples/tsconfig.json examples/marketAgent.ts",
+    "example:coordinator": "ts-node --project examples/tsconfig.json examples/coordinatorAgent.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.55.0",
@@ -29,6 +36,7 @@
     "jest": "^29.7.0",
     "supertest": "^7.2.2",
     "ts-jest": "^29.1.2",
-    "typescript": "^5.3.3"
+    "ts-node": "^10.9.2",
+    "typescript": "^5.4.0"
   }
 }

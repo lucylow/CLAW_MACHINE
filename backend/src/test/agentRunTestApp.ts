@@ -13,7 +13,7 @@ import {
 import { ReflectionEngine } from "../reflection/ReflectionEngine";
 import { SkillRegistry } from "../skills/SkillRegistry";
 import { AppError, ValidationError } from "../errors/AppError";
-import { normalizeError, toApiErrorResponse } from "../errors/normalize";
+import { normalizeAppError, toApiErrorResponse } from "../errors/appNormalize";
 
 function ok<T>(res: Response, data: T, meta: Record<string, unknown> = {}): Response {
   return res.json({ ok: true, data, meta: { ...meta, timestamp: Date.now() } });
@@ -91,7 +91,7 @@ export function createAgentRunTestApp(overrides?: {
 
   app.use((err: unknown, req: Request, res: Response, _next: NextFunction) => {
     const requestId = (req as Request & { requestId?: string }).requestId;
-    const normalized = normalizeError(err, { operation: `${req.method.toLowerCase()} ${req.path}` });
+    const normalized = normalizeAppError(err, { operation: `${req.method.toLowerCase()} ${req.path}` });
     const enriched = new AppError({
       ...normalized,
       code: normalized.code,

@@ -1088,5 +1088,48 @@ body {
 .code-preview-title { font-size: 11px; font-weight: 600; color: var(--text-secondary); padding: 6px 10px; background: var(--bg-secondary); border-bottom: 1px solid var(--border-color); }
 .code-preview-body { font-size: 10px; color: var(--accent-primary); padding: 10px; margin: 0; overflow-x: auto; white-space: pre; font-family: 'JetBrains Mono', 'Fira Code', monospace; line-height: 1.6; }
 
+/* ── Agent examples (sidebar) ───────────────────────────────────────────── */
+.agent-examples { display: flex; flex-direction: column; gap: 0.75rem; }
+.agent-examples-title { font-size: 1rem; font-weight: 700; color: var(--text); }
+.agent-examples-lead { font-size: 0.8rem; color: var(--text-muted); line-height: 1.45; }
+.agent-examples-code {
+  font-family: ui-monospace, monospace;
+  font-size: 0.72rem;
+  padding: 0.1rem 0.35rem;
+  background: var(--bg-input);
+  border-radius: 4px;
+  border: 1px solid var(--border);
+  color: var(--accent);
+}
+.agent-examples-pre {
+  font-family: ui-monospace, monospace;
+  font-size: 0.72rem;
+  line-height: 1.5;
+  padding: 0.65rem 0.75rem;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--text);
+  overflow-x: auto;
+  white-space: pre;
+}
+.agent-examples-hint { font-size: 0.72rem; color: var(--text-dim); line-height: 1.5; word-break: break-word; }
+.agent-examples-grid {
+  display: grid;
+  gap: 0.6rem;
+  grid-template-columns: 1fr;
+}
+@media (min-width: 1100px) {
+  .agent-examples-grid { grid-template-columns: 1fr 1fr; }
+}
+.agent-examples-card {
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 0.75rem 0.85rem;
+}
+.agent-examples-card-title { font-size: 0.85rem; font-weight: 600; color: var(--text); }
+.agent-examples-card-desc { margin-top: 0.35rem; font-size: 0.75rem; color: var(--text-muted); line-height: 1.4; }
+
 /* ── Spinner small ───────────────────────────────────────────────────────── */
 .spinner-sm { display: inline-block; width: 12px; height: 12px; border: 2px solid rgba(255,255,255,0.3); border-top-color: white; border-radius: 50%; animation: spin 0.7s linear infinite; }

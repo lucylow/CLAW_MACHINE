@@ -13,6 +13,9 @@ import { HowItWorks } from './components/HowItWorks.jsx';
 import EvolvePanel from './components/EvolvePanel.jsx';
 import OnChainPanel from './components/OnChainPanel.jsx';
 import Builder from './pages/Builder.jsx';
+import AgentExamples from './pages/AgentExamples.jsx';
+import { SkillRegistryPanel } from './components/SkillRegistryPanel.tsx';
+import ZeroGStatus from './components/0g/0gStatus.tsx';
 import { useWallet } from './hooks/useWallet.js';
 import { useAgentStream } from './hooks/useAgentStream.js';
 import { agentApi, walletApi } from './services/api.js';
@@ -38,6 +41,9 @@ const SIDEBAR_TABS = [
   { id: 'evolve',  label: '🧬 Evolve'  },
   { id: 'onchain', label: '⛓️ Chain'   },
   { id: 'builder', label: '🏗️ Build'   },
+  { id: 'registry', label: '🧾 Registry' },
+  { id: '0g', label: '⚡ 0G' },
+  { id: 'examples', label: '📚 Examples' },
   { id: 'howto',   label: '❓ How'     },
 ];
 
@@ -339,6 +345,15 @@ export default function App() {
             )}
             {sidebarTab === 'builder' && (
               <Builder />
+            )}
+            {sidebarTab === 'registry' && (
+              <SkillRegistryPanel />
+            )}
+            {sidebarTab === '0g' && (
+              <ZeroGStatus />
+            )}
+            {sidebarTab === 'examples' && (
+              <AgentExamples />
             )}
             {sidebarTab === 'howto' && (
               <HowItWorks />
