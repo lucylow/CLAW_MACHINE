@@ -42,5 +42,24 @@ export async function bootstrapFrameworkFromEnv(env: ParsedEnv = process.env as 
   }
   const kernel = createFrameworkKernel(config);
   await kernel.start();
+
+  // ── Graceful shutdown ──────────────────────────────────────────────────────
+  // Register SIGTERM and SIGINT handlers so the kernel stops cleanly when the
+  // process is terminated (e.g. by Docker, Kubernetes, or Ctrl-C).
+  const shutdown = async (signal: string) => {
+    kernel.logger.info(`Received ${signal} — shutting down gracefully`);
+    try {
+      await kernel.stop();
+      process.exit(0);
+    } catch (err) {
+      kernel.logger.error("Error during graceful shutdown", { error: String(err) });
+      process.exit(1);
+    }
+  };
+
+  process.once("SIGTERM", () => shutdown("SIGTERM"));
+  process.once("SIGINT",  () => shutdown("SIGINT"));
+
   return kernel;
 }
+

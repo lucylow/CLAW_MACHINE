@@ -86,6 +86,29 @@ export async function createAgent(config: AgentConfig): Promise<AgentInstance> {
     storage,
 
     async run(input: AgentTurnInput): Promise<AgentTurnResult> {
+      // Per-turn timeout enforcement
+      if (config.turnTimeoutMs) {
+        let timer: ReturnType<typeof setTimeout> | undefined;
+        const timeoutPromise = new Promise<never>((_, reject) => {
+          timer = setTimeout(
+            () => reject(new Error(`[ClawAgent] Turn timed out after ${config.turnTimeoutMs}ms`)),
+            config.turnTimeoutMs,
+          );
+        });
+        const runPromise = this._runTurn(input);
+        try {
+          const result = await Promise.race([runPromise, timeoutPromise]);
+          clearTimeout(timer);
+          return result;
+        } catch (err) {
+          clearTimeout(timer);
+          throw err;
+        }
+      }
+      return this._runTurn(input);
+    },
+
+    async _runTurn(input: AgentTurnInput): Promise<AgentTurnResult> {
       const requestId = input.requestId ?? randomUUID();
       const startedAt = Date.now();
       const ctx: TurnContext = {

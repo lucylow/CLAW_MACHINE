@@ -4,6 +4,11 @@
  * Executes hierarchical plans produced by the LLM planner.
  * Tasks with no unresolved dependencies run in parallel up to
  * the configured maxParallelism limit.
+ *
+ * New in v3:
+ *   - cancel(planId) — abort an in-flight plan
+ *   - getActivePlans() — list currently executing plans
+ *   - per-plan and per-task timeouts
  */
 
 import { randomUUID } from "crypto";
@@ -19,18 +24,51 @@ interface PlanExecutorDeps {
   compute: ComputeAdapter;
   skillRunner: SkillRunner;
   maxParallelism: number;
+  /** Optional per-plan timeout in ms. Default: no timeout. */
+  planTimeoutMs?: number;
+  /** Optional per-task timeout in ms. Default: no timeout. */
+  taskTimeoutMs?: number;
 }
 
 export class PlanExecutor {
   private readonly deps: PlanExecutorDeps;
+  /** Plans currently executing, keyed by plan id. */
+  private readonly activePlans: Map<string, { plan: Plan; abortController: AbortController }> = new Map();
 
   constructor(deps: PlanExecutorDeps) {
     this.deps = deps;
   }
 
+  /** Return a snapshot of all currently executing plans. */
+  getActivePlans(): Plan[] {
+    return [...this.activePlans.values()].map((e) => ({ ...e.plan }));
+  }
+
+  /**
+   * Cancel an in-flight plan by id.
+   * All pending tasks are immediately marked as "skipped".
+   * Returns true if the plan was found and cancelled.
+   */
+  cancel(planId: string): boolean {
+    const entry = this.activePlans.get(planId);
+    if (!entry) return false;
+    entry.abortController.abort();
+    for (const task of entry.plan.tasks) {
+      if (task.status === "pending" || task.status === "running") {
+        task.status = "skipped";
+        task.error = "Cancelled by caller";
+      }
+    }
+    entry.plan.status = "failed";
+    entry.plan.completedAt = Date.now();
+    this.activePlans.delete(planId);
+    return true;
+  }
+
   async execute(goal: string, walletAddress?: WalletAddress): Promise<Plan> {
     const planId = randomUUID();
     const createdAt = Date.now();
+    const abortController = new AbortController();
 
     // Step 1: LLM decomposes the goal into tasks
     let tasks: PlanTask[] = [];
@@ -44,6 +82,11 @@ export class PlanExecutor {
             content: `You are a planning agent. Decompose the given goal into 2-5 concrete tasks.
 Return ONLY a JSON array of task objects with this shape:
 [{ "id": "t1", "goal": "...", "dependsOn": [], "skillHint": "skill.id or null" }]
+Rules:
+  - Each task must have a unique id (t1, t2, ...).
+  - dependsOn lists ids of tasks that must complete before this one starts.
+  - skillHint is the id of the most relevant skill, or null.
+  - Do not include explanation text outside the JSON array.
 Available skills:\n${skillList || "none"}`,
           },
           { role: "user", content: goal },
@@ -79,10 +122,32 @@ Available skills:\n${skillList || "none"}`,
       status: "running",
       walletAddress,
       createdAt,
-      schemaVersion: "1.0",
+      schemaVersion: "1.1",
     };
 
-    // Step 2: Execute tasks respecting dependencies
+    this.activePlans.set(planId, { plan, abortController });
+
+    // Optional plan-level timeout
+    let planTimer: ReturnType<typeof setTimeout> | undefined;
+    if (this.deps.planTimeoutMs) {
+      planTimer = setTimeout(() => {
+        if (this.activePlans.has(planId)) {
+          this.cancel(planId);
+        }
+      }, this.deps.planTimeoutMs);
+    }
+
+    try {
+      await this.executeTasks(plan, abortController.signal);
+    } finally {
+      clearTimeout(planTimer);
+      this.activePlans.delete(planId);
+    }
+
+    return plan;
+  }
+
+  private async executeTasks(plan: Plan, signal: AbortSignal): Promise<void> {
     const results: Map<string, string> = new Map();
 
     const isReady = (task: PlanTask) =>
@@ -94,49 +159,52 @@ Available skills:\n${skillList || "none"}`,
 
     let iterations = 0;
     while (plan.tasks.some((t) => t.status === "pending" || t.status === "running")) {
+      if (signal.aborted) break;
       if (++iterations > 20) break; // safety
 
       const ready = plan.tasks.filter(isReady).slice(0, this.deps.maxParallelism);
       if (ready.length === 0) {
-        // Check for deadlock
         const pending = plan.tasks.filter((t) => t.status === "pending");
         if (pending.length > 0) {
-          for (const t of pending) t.status = "skipped";
+          for (const t of pending) { t.status = "skipped"; t.error = "Dependency deadlock"; }
         }
         break;
       }
 
-      // Mark as running
       for (const task of ready) task.status = "running";
 
-      // Execute in parallel
       await Promise.allSettled(
         ready.map(async (task) => {
+          if (signal.aborted) { task.status = "skipped"; task.error = "Cancelled"; return; }
           task.startedAt = Date.now();
           try {
-            // Build context from completed dependencies
             const depContext = task.dependsOn
               .map((dep) => results.get(dep))
               .filter(Boolean)
               .join("\n");
 
             let result: string;
+
+            // Try skill execution first
             if (task.skillHint && this.deps.skillRunner.has(task.skillHint)) {
-              const skillResult = await this.deps.skillRunner.execute(task.skillHint, {
-                input: task.goal,
-                context: depContext,
-                walletAddress,
-              });
+              const skillResult = this.deps.taskTimeoutMs
+                ? await this.deps.skillRunner.executeWithTimeout(
+                    task.skillHint,
+                    { goal: task.goal, context: depContext },
+                    this.deps.taskTimeoutMs,
+                  )
+                : await this.deps.skillRunner.execute(
+                    task.skillHint,
+                    { goal: task.goal, context: depContext },
+                  );
               result = typeof skillResult.output === "string"
                 ? skillResult.output
                 : JSON.stringify(skillResult);
             } else {
-              const resp = await this.deps.compute.complete({
+              // Fall back to LLM
+              const llmResp = await this.deps.compute.complete({
                 messages: [
-                  {
-                    role: "system",
-                    content: "Complete the given sub-task concisely. Return only the result.",
-                  },
+                  { role: "system", content: "Complete the given sub-task concisely. Return only the result." },
                   {
                     role: "user",
                     content: depContext
@@ -146,7 +214,7 @@ Available skills:\n${skillList || "none"}`,
                 ],
                 temperature: 0.4,
               });
-              result = resp.content;
+              result = llmResp.content;
             }
 
             task.result = result;
@@ -162,13 +230,13 @@ Available skills:\n${skillList || "none"}`,
       );
     }
 
-    // Step 3: Synthesis
+    // Synthesis
     const completedResults = plan.tasks
       .filter((t) => t.status === "completed" && t.result)
       .map((t) => `[${t.id}] ${t.goal}:\n${t.result}`)
       .join("\n\n");
 
-    if (completedResults) {
+    if (completedResults && !signal.aborted) {
       try {
         const synthResp = await this.deps.compute.complete({
           messages: [
@@ -178,7 +246,7 @@ Available skills:\n${skillList || "none"}`,
             },
             {
               role: "user",
-              content: `Goal: ${goal}\n\nResults:\n${completedResults}`,
+              content: `Goal: ${plan.goal}\n\nResults:\n${completedResults}`,
             },
           ],
         });
@@ -189,9 +257,7 @@ Available skills:\n${skillList || "none"}`,
     }
 
     const allOk = plan.tasks.every((t) => t.status === "completed" || t.status === "skipped");
-    plan.status = allOk ? "completed" : "failed";
+    plan.status = signal.aborted ? "failed" : allOk ? "completed" : "failed";
     plan.completedAt = Date.now();
-
-    return plan;
   }
 }

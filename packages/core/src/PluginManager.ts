@@ -4,6 +4,8 @@
  * Manages the lifecycle of all registered plugins. Plugins are executed
  * in registration order for before-hooks and in reverse order for
  * after-hooks (middleware stack pattern).
+ *
+ * v3: configurable logger, has(), count(), describe()
  */
 
 import type {
@@ -17,9 +19,33 @@ import type {
   TurnContext,
 } from "./types.js";
 
+export interface PluginManagerLogger {
+  warn(message: string, meta?: Record<string, unknown>): void;
+  error(message: string, meta?: Record<string, unknown>): void;
+}
+
+const defaultLogger: PluginManagerLogger = {
+  warn: (msg, meta) => console.warn(`[PluginManager] ${msg}`, meta ?? ""),
+  error: (msg, meta) => console.error(`[PluginManager] ${msg}`, meta ?? ""),
+};
+
+export interface PluginDescriptor {
+  id: PluginId;
+  name: string;
+  version?: string;
+  hooks: string[];
+}
+
 export class PluginManager {
   private readonly plugins: Map<PluginId, PluginDefinition> = new Map();
   private readonly order: PluginId[] = [];
+  private readonly logger: PluginManagerLogger;
+
+  constructor(logger?: PluginManagerLogger) {
+    this.logger = logger ?? defaultLogger;
+  }
+
+  // ── Registration ──────────────────────────────────────────────────────────
 
   /** Register a plugin. Throws if a plugin with the same id is already registered. */
   register(plugin: PluginDefinition): void {
@@ -35,7 +61,7 @@ export class PluginManager {
     for (const p of plugins) this.register(p);
   }
 
-  /** Unregister a plugin by id. */
+  /** Unregister a plugin by id. Returns true if it was found and removed. */
   unregister(id: PluginId): boolean {
     const idx = this.order.indexOf(id);
     if (idx === -1) return false;
@@ -43,6 +69,8 @@ export class PluginManager {
     this.order.splice(idx, 1);
     return true;
   }
+
+  // ── Introspection ─────────────────────────────────────────────────────────
 
   list(): PluginDefinition[] {
     return this.order.map((id) => this.plugins.get(id)!);
@@ -52,7 +80,26 @@ export class PluginManager {
     return this.plugins.get(id);
   }
 
-  // ── Lifecycle hooks ──────────────────────────────────────────────────────────
+  has(id: PluginId): boolean {
+    return this.plugins.has(id);
+  }
+
+  count(): number {
+    return this.plugins.size;
+  }
+
+  /** Return human-readable descriptors for all registered plugins. */
+  describe(): PluginDescriptor[] {
+    return this.order.map((id) => {
+      const p = this.plugins.get(id)!;
+      const hooks = Object.keys(p.hooks ?? {}).filter(
+        (k) => typeof (p.hooks as Record<string, unknown>)[k] === "function",
+      );
+      return { id, name: p.name ?? id, version: p.version, hooks };
+    });
+  }
+
+  // ── Lifecycle hooks ───────────────────────────────────────────────────────
 
   async runOnAgentInit(agent: AgentInstance): Promise<void> {
     for (const id of this.order) {
@@ -60,7 +107,7 @@ export class PluginManager {
       try {
         await p.hooks.onAgentInit?.(agent);
       } catch (err) {
-        console.error(`[PluginManager] onAgentInit error in plugin "${id}":`, err);
+        this.logger.error(`onAgentInit error in plugin "${id}"`, { error: String(err) });
       }
     }
   }
@@ -75,7 +122,7 @@ export class PluginManager {
       try {
         current = (await p.hooks.onBeforeTurn?.(current, ctx)) ?? current;
       } catch (err) {
-        console.error(`[PluginManager] onBeforeTurn error in plugin "${id}":`, err);
+        this.logger.error(`onBeforeTurn error in plugin "${id}"`, { error: String(err) });
       }
     }
     return current;
@@ -92,7 +139,7 @@ export class PluginManager {
       try {
         current = (await p.hooks.onAfterTurn?.(current, ctx)) ?? current;
       } catch (err) {
-        console.error(`[PluginManager] onAfterTurn error in plugin "${id}":`, err);
+        this.logger.error(`onAfterTurn error in plugin "${id}"`, { error: String(err) });
       }
     }
     return current;
@@ -105,7 +152,7 @@ export class PluginManager {
       try {
         current = (await p.hooks.onMemorySave?.(current)) ?? current;
       } catch (err) {
-        console.error(`[PluginManager] onMemorySave error in plugin "${id}":`, err);
+        this.logger.error(`onMemorySave error in plugin "${id}"`, { error: String(err) });
       }
     }
     return current;
@@ -121,7 +168,7 @@ export class PluginManager {
       try {
         await p.hooks.onSkillExecute?.(skillId, input, output);
       } catch (err) {
-        console.error(`[PluginManager] onSkillExecute error in plugin "${id}":`, err);
+        this.logger.error(`onSkillExecute error in plugin "${id}"`, { error: String(err) });
       }
     }
   }
@@ -132,7 +179,7 @@ export class PluginManager {
       try {
         await p.hooks.onError?.(error, phase);
       } catch (innerErr) {
-        console.error(`[PluginManager] onError error in plugin "${id}":`, innerErr);
+        this.logger.error(`onError error in plugin "${id}"`, { error: String(innerErr) });
       }
     }
   }
@@ -143,7 +190,7 @@ export class PluginManager {
       try {
         await p.hooks.onAgentDestroy?.(agent);
       } catch (err) {
-        console.error(`[PluginManager] onAgentDestroy error in plugin "${id}":`, err);
+        this.logger.error(`onAgentDestroy error in plugin "${id}"`, { error: String(err) });
       }
     }
   }

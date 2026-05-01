@@ -77,5 +77,47 @@ export function createMemoryRouter(memory: MemoryStore): Router {
     ok(res, { id: req.params.id, deleted: true });
   });
 
+  
+  // POST /api/memory/bulk-pin — pin multiple records at once
+  router.post("/bulk-pin", (req: Request, res: Response) => {
+    const { ids } = req.body as { ids?: unknown };
+    if (!Array.isArray(ids) || ids.length === 0) {
+      res.status(400).json({ ok: false, error: "ids must be a non-empty array" });
+      return;
+    }
+    const validIds = ids.filter((id): id is string => typeof id === "string" && id.trim().length > 0);
+    if (validIds.length === 0) {
+      res.status(400).json({ ok: false, error: "ids must contain at least one non-empty string" });
+      return;
+    }
+    const pinned: string[] = [];
+    const missing: string[] = [];
+    for (const id of validIds) {
+      try {
+        memory.pin(id);
+        pinned.push(id);
+      } catch {
+        missing.push(id);
+      }
+    }
+    ok(res, { pinned, missing, pinnedCount: pinned.length, missingCount: missing.length });
+  });
+
+  // GET /api/memory/export/:sessionId — export all memory for a session as NDJSON
+  router.get("/export/:sessionId", (req: Request, res: Response) => {
+    const { sessionId } = req.params;
+    if (!sessionId?.trim()) {
+      res.status(400).json({ ok: false, error: "sessionId is required" });
+      return;
+    }
+    const results = memory.search({ sessionId, limit: 10_000 });
+    res.setHeader("Content-Type", "application/x-ndjson");
+    res.setHeader("Content-Disposition", `attachment; filename="memory-${sessionId}.ndjson"`);
+    for (const record of results) {
+      res.write(JSON.stringify(record) + "\n");
+    }
+    res.end();
+  });
+
   return router;
 }

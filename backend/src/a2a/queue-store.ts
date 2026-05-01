@@ -95,15 +95,28 @@ export class FileQueueStore implements QueueStore {
     this.logger?.debug("A2A file queue store initialized", { directory: this.directory, namespace: this.namespace });
   }
 
-  async enqueue<TPayload>(message: AgentQueueEnvelope<TPayload>): Promise<void> {
+  async enqueue<TPayload>(message: AgentQueueEnvelope<TPayload>): Promise<AgentQueueEnvelope<TPayload>> {
     await this.init();
     const file = this.fileForQueue(message.queue);
     const state = await this.readState(file);
+
+    // Deduplication: if a non-dead-letter message with the same dedupeKey exists, return it
+    if (message.dedupeKey) {
+      const dup = state.messages.find(
+        (m) => m.dedupeKey === message.dedupeKey && m.deliveryState !== "dead-lettered",
+      );
+      if (dup) {
+        this.logger?.warn?.(`[QueueStore] Duplicate rejected: dedupeKey=${message.dedupeKey} existingId=${dup.id}`);
+        return dup as AgentQueueEnvelope<TPayload>;
+      }
+    }
+
     const existing = state.messages.findIndex((msg) => msg.id === message.id);
     if (existing >= 0) state.messages[existing] = message as AgentQueueEnvelope;
     else state.messages.push(message as AgentQueueEnvelope);
     await this.writeState(file, state);
     await this.upsertIndex(message.id, message.queue, file);
+    return message;
   }
 
   async update<TPayload>(message: AgentQueueEnvelope<TPayload>): Promise<void> {

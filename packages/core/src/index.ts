@@ -20,12 +20,18 @@
 // ── Core factory functions ────────────────────────────────────────────────────
 export { createAgent } from "./createAgent.js";
 export { AgentBuilder } from "./AgentBuilder.js";
+export type { BuilderValidationResult, BuilderDescriptor } from "./AgentBuilder.js";
+export type { BuilderValidationResult, BuilderDescriptor } from "./AgentBuilder.js";
 export { defineSkill, defineWalletSkill } from "./defineSkill.js";
 export { definePlugin } from "./definePlugin.js";
 
 // ── Internal classes (advanced use) ──────────────────────────────────────────
 export { PluginManager } from "./PluginManager.js";
+export type { PluginManagerLogger, PluginDescriptor } from "./PluginManager.js";
+export type { PluginManagerLogger, PluginDescriptor } from "./PluginManager.js";
 export { SkillRunner } from "./SkillRunner.js";
+export type { SkillStats } from "./SkillRunner.js";
+export type { SkillStats } from "./SkillRunner.js";
 export { PlanExecutor } from "./PlanExecutor.js";
 
 // ── Built-in adapters ─────────────────────────────────────────────────────────

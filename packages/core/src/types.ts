@@ -322,6 +322,14 @@ export interface AgentConfig {
   skills?: SkillDefinition[];
   /** Maximum parallel tasks in hierarchical planner */
   maxPlanParallelism?: number;
+  /** Per-turn execution timeout in ms. Turns exceeding this limit throw a TimeoutError. */
+  turnTimeoutMs?: number;
+  /** Searchable tags for the on-chain skill registry. */
+  tags?: string[];
+  /** Per-turn execution timeout in ms. Turns exceeding this limit throw a TimeoutError. */
+  turnTimeoutMs?: number;
+  /** Searchable tags for the on-chain skill registry. */
+  tags?: string[];
   /** Enable reflection loop after each turn */
   enableReflection?: boolean;
   /** Enable memory pruning */
